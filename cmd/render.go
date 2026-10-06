@@ -186,7 +186,7 @@ func renderAssetAndInstall(w io.Writer, s styles, t engine.ToolRec, indent strin
 }
 
 // suggestContext prints, to stderr, a one-line hint when results span multiple
-// domains — a suggestion, never an automatic switch.
+// domains - a suggestion, never an automatic switch.
 func suggestContext(recs []engine.Recommendation) {
 	seen := map[string]bool{}
 	var domains []string
@@ -205,7 +205,7 @@ func suggestContext(recs []engine.Recommendation) {
 		shown = shown[:4]
 	}
 	fmt.Fprintln(os.Stderr, s.dim.Render(
-		fmt.Sprintf("tip: results span %s — scope with  -c <domain>  (or export ADVSEC_CONTEXT)",
+		fmt.Sprintf("tip: results span %s - scope with  -c <domain>  (or export ADVSEC_CONTEXT)",
 			strings.Join(shown, ", "))))
 }
 

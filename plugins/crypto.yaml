@@ -1,4 +1,4 @@
-# Cryptography / encoding plugins — triggered by hashes, encoded blobs, keys,
+# Cryptography / encoding plugins - triggered by hashes, encoded blobs, keys,
 # and CTF crypto artifacts.
 ---
 id: crypto-hash-id
@@ -47,7 +47,7 @@ match:
 tactics:
   phase: "Decoding"
   priority: 15
-  next_step: "Decode the blob — it may nest further encodings, compression, or a serialized object."
+  next_step: "Decode the blob - it may nest further encodings, compression, or a serialized object."
   tools:
     - name: "base64 -d"
       binary: "base64"
@@ -172,7 +172,7 @@ match:
 tactics:
   phase: "Cryptanalysis (PKI)"
   priority: 28
-  next_step: "Read the subject, SANs, validity, and signature algorithm — weak algos or extra SANs are findings."
+  next_step: "Read the subject, SANs, validity, and signature algorithm - weak algos or extra SANs are findings."
   tools:
     - name: "openssl x509"
       binary: "openssl"

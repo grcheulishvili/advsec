@@ -1,4 +1,4 @@
-# System administration / Linux operations plugins — triggered by health,
+# System administration / Linux operations plugins - triggered by health,
 # service, and diagnostic output.
 ---
 id: sys-disk-full
@@ -72,7 +72,7 @@ match:
 tactics:
   phase: "System Operations (Memory)"
   priority: 52
-  next_step: "Find what was killed and the memory trend — decide between a leak, under-provisioning, or a runaway job."
+  next_step: "Find what was killed and the memory trend - decide between a leak, under-provisioning, or a runaway job."
   tools:
     - name: "oom report"
       binary: "journalctl"
@@ -150,7 +150,7 @@ match:
 tactics:
   phase: "System Operations (Network)"
   priority: 42
-  next_step: "Isolate the layer — link/route, DNS, or firewall — working outward from the interface."
+  next_step: "Isolate the layer - link/route, DNS, or firewall - working outward from the interface."
   tools:
     - name: "link + route"
       binary: "ip"

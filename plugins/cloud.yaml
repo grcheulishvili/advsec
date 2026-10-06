@@ -1,4 +1,4 @@
-# Cloud / container plugins — triggered by cloud CLI output, k8s/docker
+# Cloud / container plugins - triggered by cloud CLI output, k8s/docker
 # artifacts, and IaC/config context.
 ---
 id: cloud-docker
@@ -16,7 +16,7 @@ match:
 tactics:
   phase: "Cloud / Container Assessment"
   priority: 45
-  next_step: "Check for a mounted docker.sock or privileged containers — both are direct host-escape paths."
+  next_step: "Check for a mounted docker.sock or privileged containers - both are direct host-escape paths."
   tools:
     - name: "socket escape check"
       binary: "docker"
@@ -102,7 +102,7 @@ match:
 tactics:
   phase: "Cloud Assessment (Storage)"
   priority: 58
-  next_step: "Test for public list/read/write — misconfigured buckets leak data or allow content injection."
+  next_step: "Test for public list/read/write - misconfigured buckets leak data or allow content injection."
   tools:
     - name: "s3 anon list"
       binary: "aws"

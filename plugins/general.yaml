@@ -1,4 +1,4 @@
-# General-usability plugins — everyday file/data handling, triggered mostly by
+# General-usability plugins - everyday file/data handling, triggered mostly by
 # `file`, and useful to sysadmins and analysts alike.
 ---
 id: gen-archive
@@ -95,7 +95,7 @@ match:
 tactics:
   phase: "General (Source)"
   priority: 14
-  next_step: "Scan the full history for secrets — deleted commits still hold them — then review branches and config."
+  next_step: "Scan the full history for secrets - deleted commits still hold them - then review branches and config."
   tools:
     - name: "history secrets"
       binary: "gitleaks"
@@ -122,7 +122,7 @@ match:
 tactics:
   phase: "General (Database)"
   priority: 16
-  next_step: "Enumerate tables and dump high-value ones — app DBs often store users, sessions, and tokens."
+  next_step: "Enumerate tables and dump high-value ones - app DBs often store users, sessions, and tokens."
   tools:
     - name: "sqlite tables"
       binary: "sqlite3"
@@ -148,7 +148,7 @@ match:
 tactics:
   phase: "General (Triage)"
   priority: 5
-  next_step: "Unrecognized blob — check magic bytes, entropy, and embedded signatures to decide the handling path."
+  next_step: "Unrecognized blob - check magic bytes, entropy, and embedded signatures to decide the handling path."
   tools:
     - name: "hexdump head"
       binary: "xxd"

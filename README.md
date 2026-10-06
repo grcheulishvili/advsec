@@ -1,26 +1,32 @@
 # advsec
 
-**Context-aware UNIX pipe recommendation engine.**
+A context-aware UNIX pipeline utility for Linux (Arch/BlackArch, Debian/Kali) that reads the output of a tool you just ran and tells you what to do next.
 
-`advsec` reads piped `stdin` from upstream tools (`nmap`, `file`, `curl`, `gdb`,
-`journalctl`, …), evaluates the operational context against a local YAML plugin
-matrix, checks whether the recommended tooling is installed on the host, and
-prints prioritized, executable next steps to `stdout`.
+Pipe it `file`, `nmap`, `curl`, `journalctl`, a raw `.eml`, a packet capture - anything. advsec classifies the stream, extracts the entities that matter, matches them against a local plugin library, and prints an ordered, ready-to-run action chain scoped to your host and your task.
 
-Built for cybersecurity researchers, systems/network engineers, penetration
-testers, reverse engineers, and malware analysts. Single static Go binary, zero
-runtime dependencies, sub-millisecond parsing.
-
-```
+```sh
 file suspicious.bin | advsec
-nmap -sV 10.10.10.5 | advsec --top 3
-curl -sI https://target | advsec
-journalctl -u ssh --since -1h | advsec
+nmap -sV 10.10.10.5  | advsec -c net
+cat phish.eml        | advsec
 ```
 
 ---
 
-## Install
+## Key capabilities
+
+- **UNIX pipe stream parsing** - bounded 2 MB streaming reader; extracts IPs, IPv6, domains, URLs, ports, hashes, CVEs and (in debugger output) memory addresses, with loopback/bind and reverse-DNS noise suppressed.
+- **Magic-byte format profiling** - classifies the input (`email/mime`, `binary/elf|pe|macho`, `archive/zip|gzip|7z`, `text/pcap`, `text/log`, `document/pdf`, `text/json`) and auto-scopes rules so a raw `.eml` never triggers Kerberoasting or SDR rules.
+- **Action-chain phase sequencing** - groups suggestions into ordered phases (passive triage first, destructive actions last) and reorders them around an inferred intent (reputation lookup, post-mortem triage, immediate containment).
+- **Native package manager integration** - every suggested tool is checked against `PATH`; missing ones come with the exact install command for the host (`pacman`/`yay` on Arch, `apt` on Debian/Kali, or a `pipx`/`go`/`cargo` hint when not distro-packaged).
+- **Asset verification** - hardcoded paths like `/usr/share/wordlists/rockyou.txt` are `os.Stat`-checked, substituted from known locations when possible, or flagged with an install tip.
+- **Offline YAML plugin system** - 129+ rules across 16 domains, loaded from local files. No network needed at runtime; `advsec plugin update` pulls the latest set anonymously over HTTPS.
+- **Single static binary** - Go, zero runtime dependencies, sub-20 ms on typical piped input.
+
+---
+
+## Installation
+
+Requires Go 1.22+ to build.
 
 ### Arch / BlackArch (PKGBUILD)
 
@@ -28,212 +34,150 @@ journalctl -u ssh --since -1h | advsec
 makepkg -si
 ```
 
-### Universal (build from source)
+### Script installer (any supported distro)
+
+Detects the distro, installs Go if missing, builds, and installs the binary plus the bundled plugins:
 
 ```sh
-sudo ./install.sh          # detects distro, installs Go if needed, builds, installs
-sudo ./install.sh -u       # uninstall
+sudo ./install.sh        # install
+sudo ./install.sh -u     # uninstall
 ```
 
-### Make
+### Manual (make)
 
 ```sh
-make build                 # -> ./bin/advsec
-sudo make install          # -> /usr/local/bin + /usr/share/advsec/plugins
+make build               # -> ./bin/advsec
+sudo make install        # -> /usr/local/bin + /usr/share/advsec/plugins
 ```
-
-Requires Go 1.22+.
 
 ---
 
 ## Usage
 
-Piping into `advsec` runs the analyzer (the default command):
+Pipe a tool's output into advsec; the default command analyzes it:
 
 ```sh
-<upstream-command> | advsec [--top N] [--missing-only] [--json] [--no-color]
+<command> | advsec [flags]
 ```
+
+### Examples
+
+```sh
+file suspicious.bin        | advsec              # binary triage -> RE action chain
+nmap -sV 10.10.10.5        | advsec -c net       # scope to network services
+curl -sI https://target    | advsec -c web       # web fingerprint -> recon chain
+cat message.eml            | advsec              # auto-detected as email, eml-only rules
+journalctl -u ssh          | advsec -c dfir      # incident-response chain
+sha256sum sample.bin       | advsec              # lone hash -> reputation intent
+```
+
+### Domain scoping
+
+Scope evaluation to the job at hand. Only that domain plus always-on `general` rules run:
+
+```sh
+... | advsec -c dfir       # or web, pwn, net, ad, sysadmin, crypto, cloud, ...
+... | advsec -i            # pick the context from an interactive menu
+export ADVSEC_CONTEXT=ad   # pin a default for the session
+```
+
+Aliases resolve to canonical domains (`net`->network, `ad`->redteam, `ir`->dfir, `k8s`->cloud, `re`->reversing). With no context set, advsec evaluates everything and, when results span domains, prints a one-line scoping suggestion to stderr - it never switches for you.
+
+---
+
+## Shell integration (Ctrl+Alt+A)
+
+A non-intrusive widget that, on a hotkey, re-runs your last command, pipes it through `advsec --top 3`, and prints suggestions beneath the prompt. It does not run on every command and never alters your command buffer.
+
+### Zsh
+
+```sh
+advsec init zsh >> ~/.zshrc
+source ~/.zshrc
+```
+
+Then press **Ctrl+Alt+A** after any command. (Ctrl+Alt+S analyzes the current buffer instead.)
+
+### Bash
+
+```sh
+advsec init bash >> ~/.bashrc
+source ~/.bashrc
+```
+
+Then press **Ctrl+Alt+A**.
+
+The generated snippet is self-delimited (`# >>> advsec ... >>>` / `# <<< advsec ... <<<`) and prepends blank lines, so appending it is always safe.
+
+---
+
+## Plugin schema
+
+Plugins are YAML, loaded from `~/.config/advsec/plugins/` (user) and `/usr/share/advsec/plugins/` (system); user files override system by `id`. One file may hold many plugins separated by `---`.
+
+```yaml
+id: rev-elf-triage                 # unique, required
+name: "ELF Binary Triage"
+target_type: binary
+domain: reversing                  # optional; defaults to the file stem. Used by -c
+author: official
+os_packages:                       # family -> packages that provide the tools
+  arch:   [radare2, binutils]
+  debian: [radare2, binutils]
+  kali:   [radare2, binutils]
+match:
+  logic: all                       # all (default) | any
+  rules:
+    - regex: 'ELF (32|64)-bit'     # regex (RE2) | contains | entity_type
+    # - contains: "literal"
+    # - entity_type: hash          # ip|ipv6|domain|url|port|hash|mem_addr|cve|email
+tactics:
+  phase: "Reverse Engineering"
+  priority: 60                     # higher ranks first; 0 = auto from specificity
+  next_step: "Identify, then analyze statically, then debug."
+  tools:
+    - name: "file & checksec"
+      binary: "checksec"           # PATH check; defaults to first word of command
+      step: 1                      # action-chain position (1 passive .. 4 active)
+      phase_label: "Phase 1: Identification & Mitigations"
+      command: "file {target} ; checksec --file={target}"
+      purpose: "Verify architecture and security mitigations."
+      install: "pipx install ..."  # optional fallback when not distro-packaged
+```
+
+**Placeholders** expanded from parsed entities: `{target}`, `{target_ip}`, `{target_domain}`, `{target_port}`, `{target_url}`, `{target_hash}`, `{target_addr}`, `{target_cve}`.
+
+**Domains**: `pwn`, `reversing`, `web`, `network`, `recon`, `redteam`, `blueteam`, `forensics`, `crypto`, `ctf`, `cloud`, `sysadmin`, `dfir`, `mobile`, `wireless`, `eml`, `general`.
+
+Manage plugins:
+
+```sh
+advsec plugin list                 # installed + active plugins
+advsec plugin install owner/repo   # GitHub shorthand, git URL, or a .yaml URL
+advsec plugin update               # pull latest official rules (anonymous HTTPS)
+advsec update-cache                # refresh the OS package-mapping cache
+```
+
+---
+
+## CLI reference
 
 | Flag | Effect |
 |------|--------|
-| `-c, --context <domain>` / `--domain` | Scope rules to one domain (`dfir`, `web`, `pwn`, `net`, `ad`, `sysadmin`, `crypto`, `cloud`, …). Also via `$ADVSEC_CONTEXT`. |
-| `-i, --select` | Interactively pick the context before evaluation (reads `/dev/tty`) |
-| `--min-confidence N` | Minimum match confidence to render (default `2`) |
+| `-c, --context <domain>` / `--domain` | Scope rules to one domain (also via `$ADVSEC_CONTEXT`) |
+| `-i, --select` | Pick the context from an interactive menu |
 | `-a, --all` | Show every match regardless of confidence |
-| `--no-classify` | Disable magic-byte format gating (evaluate all domains) |
-| `--format <fmt>` | Force the input format (e.g. `email/mime`, `binary/elf`) |
-| `--flat` | Flat per-plugin list instead of phase-grouped action chains |
+| `--min-confidence N` | Minimum match confidence to render (default 2) |
 | `--top N` | Show only the N highest-priority recommendations |
-| `--missing-only` | Only show tools not installed locally (plus their install command) |
-| `--json` | Machine-readable output (includes `domain` and `confidence`) |
+| `--missing-only` | Only show tools not installed locally |
+| `--flat` | Flat per-plugin list instead of phase-grouped action chains |
+| `--no-classify` | Disable magic-byte format gating (evaluate all domains) |
+| `--format <fmt>` | Force the input format instead of auto-detecting |
+| `--json` | Machine-readable output (domain, confidence, step, asset notes) |
 | `--no-color` | Disable ANSI styling |
 | `-f, --input FILE` | Read from a file instead of stdin |
 
-### Action-chain sequencing
-
-Recommendations are rendered as an ordered **action chain**, not a flat list:
-tools are grouped under phase headers and sorted non-destructively (passive
-triage → enumeration → active/exploit → remediation). Each domain has its own
-standard sequence (e.g. reversing: *Identify → Static → Dynamic → Exploit*;
-DFIR: *Triage → Containment → Forensics → Remediation*). Plugins can pin a
-tool's place with `step:` and `phase_label:`; otherwise the step is inferred
-from the command.
-
-advsec also infers an **intent** from the payload and reorders accordingly:
-
-- a lone hash → *Reputation & IOC Search* (threat-intel lookups before cracking)
-- a crash / core dump → *Post-Mortem Triage* (stack trace before disassembly)
-- a log stream with active failures → *Immediate Containment* (isolation first)
-
-Use `--flat` for the previous per-plugin layout.
-
-### Format classification
-
-Before matching, advsec profiles the first 512 bytes of the stream (magic bytes
-+ structured-text heuristics) and classifies it: `email/mime`, `binary/elf`,
-`binary/pe`, `binary/macho`, `archive/zip|gzip|7z`, `text/pcap`, `text/log`,
-`document/pdf`, `text/json`, `text/plain`. Container formats are **scoped
-automatically** — e.g. a raw `.eml` runs only the `eml` domain, so
-`cat message.eml | advsec` no longer trips Kerberoasting, Docker, SDR or
-Bluetooth rules. An explicit `-c` overrides the gate; `--no-classify` disables
-it; `--format` forces one.
-
-### Asset verification
-
-Commands that reference a hardcoded asset path (`/usr/share/wordlists/…`,
-`/usr/share/yara-rules/…`) are checked with `os.Stat` before rendering. If the
-path is missing, advsec searches the usual locations
-(`/usr/share/seclists`, `/usr/share/wordlists`, `/usr/share/dict`) for a
-substitute; failing that it prints a `<path-to-…>` placeholder with a
-`[!] Missing Asset` warning and an install tip for your distro.
-
-### Context scoping
-
-Rules carry a `domain` (defaulting to their file stem). Scope evaluation to the
-job at hand — only that domain plus always-on `general` rules run:
-
-```sh
-journalctl -u ssh | advsec -c dfir      # incident response only
-ffuf ... | advsec -c web                # web only
-export ADVSEC_CONTEXT=ad                # pin a default (Active Directory)
-nmap ... | advsec -i                    # pick interactively
-```
-
-Aliases resolve to canonical domains (`net`→network, `ad`→redteam, `ir`→dfir,
-`k8s`→cloud, `re`→reversing, …). With no context set, advsec evaluates
-everything and, if results span multiple domains, prints a one-line scoping
-*suggestion* to stderr — it never switches context for you.
-
-### Shell integration
-
-`advsec plugin update` fetches the official rules from the public repo's
-`plugins/` directory **anonymously over HTTPS** (`GIT_TERMINAL_PROMPT=0`, no SSH,
-no credential prompt), falling back to the public branch ZIP when `git` is
-absent or errors.
-
-`advsec init zsh` / `advsec init bash` emit a non-intrusive widget bound to
-**Ctrl+Alt+A**: it re-runs your last command, pipes the output through
-`advsec --top 3`, and prints suggestions beneath the prompt without touching
-your command buffer. It does **not** run on every command.
-
-```sh
-advsec init zsh  >> ~/.zshrc
-advsec init bash >> ~/.bashrc
-```
-
-### Plugin management
-
-```sh
-advsec plugin list                      # installed + active plugins
-advsec plugin install owner/repo        # GitHub shorthand
-advsec plugin install https://host/x.yaml
-advsec plugin update                    # pull official + community rules
-advsec update-cache                     # refresh OS package mapping database
-```
-
----
-
-## How it works
-
-1. **Parse** — a bounded 2 MB streaming buffer reads stdin and extracts IPs,
-   domains, URLs, ports, file headers, protocol banners, hashes, memory
-   addresses, and CVEs. Every IP is validated with `net.ParseIP`; loopback/bind
-   addresses and reverse-DNS zones are suppressed; hex values only count as
-   memory addresses inside genuine debugger/pwn output (so `0x8007000D`-style
-   error codes don't masquerade as pointers).
-2. **Scope** — if a context is set (`-c`, `$ADVSEC_CONTEXT`, or `--select`),
-   only that domain's rules plus always-on `general` rules are evaluated.
-3. **Match + score** — each plugin's `match.rules` (regex / substring /
-   entity-type) run with `all`/`any` logic; matched rules accrue a confidence
-   weight, and matches below `--min-confidence` (default 2) are suppressed to
-   kill incidental false positives.
-4. **Evaluate** — matches are ranked by priority, command placeholders
-   (`{target}`, `{target_ip}`, …) are expanded, and each tool is checked
-   against `PATH`.
-5. **Recommend** — phases, objectives, and ready-to-run commands are printed;
-   missing tools come with the exact native install command (`pacman`/`yay` on
-   Arch, `apt` on Debian/Kali) or a pip/go/cargo hint when not distro-packaged.
-
----
-
-## Plugins
-
-Plugins are declarative YAML, loaded from (user overrides system):
-
-- `~/.config/advsec/plugins/` (also honors `$XDG_CONFIG_HOME` / `$ADVSEC_CONFIG_DIR`)
-- `/usr/share/advsec/plugins/`
-
-The bundled library ships 125+ rules across 15 domains (a file may hold many
-plugins separated by `---`):
-
-`pwn` · `reversing` · `web` · `network` · `recon` · `redteam` · `blueteam` ·
-`forensics` · `crypto` · `ctf` · `cloud` · `sysadmin` · `dfir` · `mobile` ·
-`wireless` · `eml` · `general` — covering pentest, red team, blue team / DFIR, RE,
-CTF, cloud/container, wireless, and day-to-day sysadmin triage.
-
-### Schema
-
-```yaml
-id: pwn-elf64-exec-stack          # unique, required
-name: ELF 64-bit (Executable Stack)
-target_type: binary
-domain: pwn                       # optional; defaults to the file stem. Used by -c/--context
-author: official
-os_packages:                      # family -> packages providing the tools
-  arch:   [checksec, gdb, radare2]
-  debian: [checksec, gdb, radare2]
-  kali:   [checksec, gdb, radare2]
-match:
-  logic: all                      # all (default) | any
-  rules:
-    - regex: "ELF 64-bit"
-    - regex: "executable stack"
-    # - contains: "literal substring"
-    # - entity_type: hash         # ip|ipv6|domain|url|port|hash|mem_addr|cve
-tactics:
-  phase: "Binary Exploitation"
-  priority: 60                    # higher wins; 0 = auto from rule specificity
-  next_step: "Find the overflow offset and build a payload."
-  tools:
-    - name: checksec
-      binary: checksec            # PATH check; defaults to first word of command
-      command: "checksec --file={target}"
-      purpose: "Enumerate binary protections."
-      install: "pipx install ..."  # optional: fallback when not distro-packaged
-```
-
-`install` is an optional manager-agnostic install command (pip/pipx/go/cargo or
-a vendor script). It is used only when the tool is missing from `PATH` **and**
-no native package in `os_packages` provides it — so distro-packaged tools still
-get a native `pacman`/`apt` command, while pip/go-only tooling gets an accurate
-one.
-
-### Command placeholders
-
-`{target}` · `{target_ip}` · `{target_domain}` · `{target_port}` ·
-`{target_url}` · `{target_hash}` · `{target_addr}` · `{target_cve}`
-
-Unmatched placeholders are left intact so you can see what still needs filling.
+Subcommands: `analyze` (default), `plugin list|install|update`, `update-cache`, `init zsh|bash`.
 
 ---
 
@@ -241,18 +185,18 @@ Unmatched placeholders are left intact so you can see what still needs filling.
 
 ```
 advsec/
-├── main.go
-├── cmd/            root, analyze, plugin, init commands + render/select (cobra)
-├── pkg/
-│   ├── engine/     parser, classifier, matcher, evaluator, sequence, assets
-│   ├── osdetect/   distro detection + package manager mapping
-│   └── plugin/     YAML types, loader, lifecycle manager
-├── plugins/        125+ rules across 15 domain files (see below)
-├── Makefile
-├── PKGBUILD
-└── install.sh
+|- main.go
+|- cmd/            root, analyze, plugin, init commands + render/select (cobra)
+|- pkg/
+|  |- engine/      parser, classifier, matcher, evaluator, sequence, assets
+|  |- osdetect/    distro detection + package manager mapping
+|  |- plugin/      YAML types, loader, lifecycle manager
+|- plugins/        129+ rules across 16 domain files
+|- Makefile
+|- PKGBUILD
+|- install.sh
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

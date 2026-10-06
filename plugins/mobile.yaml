@@ -1,4 +1,4 @@
-# Mobile application plugins — triggered by `file` output and mobile artifacts.
+# Mobile application plugins - triggered by `file` output and mobile artifacts.
 ---
 id: mobile-apk
 name: "Android APK"

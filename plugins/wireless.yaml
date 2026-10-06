@@ -1,4 +1,4 @@
-# Wireless / RF plugins — triggered by airodump, bluetooth, and capture output.
+# Wireless / RF plugins - triggered by airodump, bluetooth, and capture output.
 ---
 id: wifi-handshake
 name: "WPA Handshake / Capture"
@@ -94,7 +94,7 @@ match:
 tactics:
   phase: "Wireless (SDR)"
   priority: 30
-  next_step: "Identify the modulation and frequency, then demodulate — common IoT/remotes live around 433/868/915 MHz."
+  next_step: "Identify the modulation and frequency, then demodulate - common IoT/remotes live around 433/868/915 MHz."
   tools:
     - name: "rtl_433"
       binary: "rtl_433"

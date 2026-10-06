@@ -1,4 +1,4 @@
-# Blue team / detection / threat-hunting plugins — triggered by log lines,
+# Blue team / detection / threat-hunting plugins - triggered by log lines,
 # IDS/EDR alerts, and IOC material.
 ---
 id: bt-ioc-hash

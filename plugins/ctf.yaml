@@ -1,4 +1,4 @@
-# CTF-focused plugins — steganography, esoteric encodings, and misc challenge
+# CTF-focused plugins - steganography, esoteric encodings, and misc challenge
 # patterns. Triggered by `file` output on media and challenge text.
 ---
 id: ctf-image-stego
@@ -125,7 +125,7 @@ match:
 tactics:
   phase: "CTF (Decode)"
   priority: 24
-  next_step: "Decode the symbol to text — it may contain the flag or a next-stage URL."
+  next_step: "Decode the symbol to text - it may contain the flag or a next-stage URL."
   tools:
     - name: "zbarimg"
       binary: "zbarimg"

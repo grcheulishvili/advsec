@@ -1,4 +1,4 @@
-# Binary exploitation plugins — triggered by `file`, checksec, gdb, and
+# Binary exploitation plugins - triggered by `file`, checksec, gdb, and
 # CTF pwn artifact context.
 ---
 id: pwn-elf64-exec-stack
@@ -54,7 +54,7 @@ match:
 tactics:
   phase: "Binary Exploitation (Stack Overflow)"
   priority: 65
-  next_step: "No canary means a straight stack smash is viable — overwrite saved RIP directly."
+  next_step: "No canary means a straight stack smash is viable - overwrite saved RIP directly."
   tools:
     - name: "pattern offset"
       binary: "pwn"
@@ -82,7 +82,7 @@ match:
 tactics:
   phase: "Binary Exploitation (ROP)"
   priority: 55
-  next_step: "Stack is non-executable — chain existing gadgets (ret2libc / ret2syscall) instead of injecting shellcode."
+  next_step: "Stack is non-executable - chain existing gadgets (ret2libc / ret2syscall) instead of injecting shellcode."
   tools:
     - name: "ROPgadget"
       binary: "ROPgadget"
@@ -160,7 +160,7 @@ match:
 tactics:
   phase: "Binary Exploitation (PIE)"
   priority: 40
-  next_step: "Base is randomized — leak a code/stack address first, then compute gadget addresses relative to it."
+  next_step: "Base is randomized - leak a code/stack address first, then compute gadget addresses relative to it."
   tools:
     - name: "vmmap"
       binary: "gdb"
@@ -183,7 +183,7 @@ match:
 tactics:
   phase: "Binary Exploitation (static)"
   priority: 55
-  next_step: "No libc to leak — build a ret2syscall chain from gadgets inside the binary itself."
+  next_step: "No libc to leak - build a ret2syscall chain from gadgets inside the binary itself."
   tools:
     - name: "ROPgadget syscalls"
       binary: "ROPgadget"
@@ -206,7 +206,7 @@ match:
 tactics:
   phase: "Privilege Escalation (SUID)"
   priority: 60
-  next_step: "A SUID root binary is a privesc candidate — trace its calls for relative paths, env reliance, or injectable args."
+  next_step: "A SUID root binary is a privesc candidate - trace its calls for relative paths, env reliance, or injectable args."
   tools:
     - name: "strace"
       binary: "strace"

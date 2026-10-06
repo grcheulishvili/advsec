@@ -1,4 +1,4 @@
-# Red team / post-exploitation / Active Directory plugins — triggered by
+# Red team / post-exploitation / Active Directory plugins - triggered by
 # enumeration output (BloodHound, nxc, linpeas, secretsdump, etc.).
 ---
 id: rt-ad-domain-joined
@@ -44,7 +44,7 @@ match:
 tactics:
   phase: "Active Directory (Credential Access)"
   priority: 72
-  next_step: "Request TGS tickets for SPN accounts and crack them offline — service accounts often have weak passwords."
+  next_step: "Request TGS tickets for SPN accounts and crack them offline - service accounts often have weak passwords."
   tools:
     - name: "GetUserSPNs"
       binary: "GetUserSPNs.py"
@@ -71,7 +71,7 @@ match:
 tactics:
   phase: "Active Directory (Credential Access)"
   priority: 70
-  next_step: "Accounts without pre-auth leak crackable AS-REP hashes to anyone — roast and crack them."
+  next_step: "Accounts without pre-auth leak crackable AS-REP hashes to anyone - roast and crack them."
   tools:
     - name: "GetNPUsers"
       binary: "GetNPUsers.py"
@@ -98,7 +98,7 @@ match:
 tactics:
   phase: "Credential Access / Lateral Movement"
   priority: 74
-  next_step: "With NT hashes you can pass-the-hash laterally or crack them offline — spray across the subnet."
+  next_step: "With NT hashes you can pass-the-hash laterally or crack them offline - spray across the subnet."
   tools:
     - name: "pth nxc"
       binary: "nxc"
@@ -125,7 +125,7 @@ match:
 tactics:
   phase: "Lateral Movement (Relay)"
   priority: 66
-  next_step: "Hosts without SMB signing are relay targets — poison name resolution and relay captured auth."
+  next_step: "Hosts without SMB signing are relay targets - poison name resolution and relay captured auth."
   tools:
     - name: "ntlmrelayx"
       binary: "ntlmrelayx.py"
@@ -204,7 +204,7 @@ match:
 tactics:
   phase: "Credential Access (LSASS)"
   priority: 72
-  next_step: "Parse the LSASS dump offline to avoid AV — extract plaintext, NT hashes, and Kerberos keys."
+  next_step: "Parse the LSASS dump offline to avoid AV - extract plaintext, NT hashes, and Kerberos keys."
   tools:
     - name: "pypykatz"
       binary: "pypykatz"
@@ -227,7 +227,7 @@ match:
 tactics:
   phase: "Credential Access (Domain Takeover)"
   priority: 80
-  next_step: "Replication rights = full domain compromise — DCSync the krbtgt hash and forge a Golden Ticket."
+  next_step: "Replication rights = full domain compromise - DCSync the krbtgt hash and forge a Golden Ticket."
   tools:
     - name: "secretsdump dcsync"
       binary: "secretsdump.py"
@@ -273,7 +273,7 @@ match:
 tactics:
   phase: "Credential Access (GPP)"
   priority: 64
-  next_step: "GPP cPassword is AES-encrypted with a Microsoft-published key — decrypt it instantly."
+  next_step: "GPP cPassword is AES-encrypted with a Microsoft-published key - decrypt it instantly."
   tools:
     - name: "gpp-decrypt"
       binary: "gpp-decrypt"

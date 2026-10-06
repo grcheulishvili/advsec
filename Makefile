@@ -1,9 +1,9 @@
-# advsec — build, test, and install targets.
+# advsec - build, test, and install targets.
 BINARY      := advsec
 PKG         := github.com/grcheulishvili/advsec
 CMD_PKG     := $(PKG)/cmd
 
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.5.0)
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.5.1)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 DATE        ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 

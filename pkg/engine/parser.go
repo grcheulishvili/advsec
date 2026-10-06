@@ -67,7 +67,7 @@ var (
 	// reIPv4 matches dotted-quad addresses. Octet range is validated in a
 	// post-filter to keep the expression fast and readable.
 	reIPv4 = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	// reIPv6 is a permissive *candidate* matcher — anything that looks roughly
+	// reIPv6 is a permissive *candidate* matcher - anything that looks roughly
 	// like an IPv6 address. Every candidate is then validated with
 	// net.ParseIP, which enforces the real 8-group / compression grammar and
 	// eliminates junk like "C:c:F:" or register dumps. The candidate requires

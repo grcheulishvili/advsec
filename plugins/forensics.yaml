@@ -1,4 +1,4 @@
-# Digital forensics plugins — triggered by image/memory/pcap artifact context.
+# Digital forensics plugins - triggered by image/memory/pcap artifact context.
 ---
 id: for-memory-dump
 name: "Memory Dump / RAM Image"
@@ -68,7 +68,7 @@ match:
 tactics:
   phase: "Forensics (Carving)"
   priority: 45
-  next_step: "Extract embedded/appended files — containers often hide additional archives or images."
+  next_step: "Extract embedded/appended files - containers often hide additional archives or images."
   tools:
     - name: "binwalk extract"
       binary: "binwalk"
@@ -120,7 +120,7 @@ match:
 tactics:
   phase: "Forensics (Metadata)"
   priority: 35
-  next_step: "Metadata leaks authorship, software, timestamps, and GPS — extract all tags and geotags."
+  next_step: "Metadata leaks authorship, software, timestamps, and GPS - extract all tags and geotags."
   tools:
     - name: "exiftool"
       binary: "exiftool"

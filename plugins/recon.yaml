@@ -1,4 +1,4 @@
-# Reconnaissance / OSINT plugins — triggered by target handoffs (a bare
+# Reconnaissance / OSINT plugins - triggered by target handoffs (a bare
 # domain, IP range, or email) and discovery-tool output.
 ---
 id: recon-domain-target
@@ -76,7 +76,7 @@ match:
 tactics:
   phase: "External Reconnaissance (CT)"
   priority: 18
-  next_step: "SANs and CT logs reveal sibling hostnames and internal names — mine them for more surface."
+  next_step: "SANs and CT logs reveal sibling hostnames and internal names - mine them for more surface."
   tools:
     - name: "crt.sh"
       binary: "curl"
@@ -152,7 +152,7 @@ match:
 tactics:
   phase: "External Reconnaissance (vhost)"
   priority: 20
-  next_step: "One IP often hosts many sites — fuzz the Host header to reveal hidden virtual hosts."
+  next_step: "One IP often hosts many sites - fuzz the Host header to reveal hidden virtual hosts."
   tools:
     - name: "ffuf vhost"
       binary: "ffuf"

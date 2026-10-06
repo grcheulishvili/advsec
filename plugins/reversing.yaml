@@ -1,4 +1,4 @@
-# Reverse engineering plugins — triggered by `file`, strings, and binary
+# Reverse engineering plugins - triggered by `file`, strings, and binary
 # triage output across ELF / PE / Mach-O and managed runtimes.
 ---
 id: rev-elf-triage
@@ -65,7 +65,7 @@ match:
 tactics:
   phase: "Reverse Engineering (unpacking)"
   priority: 55
-  next_step: "Unpack before analysis — UPX is reversible with its own tool; manually dump if the header was tampered."
+  next_step: "Unpack before analysis - UPX is reversible with its own tool; manually dump if the header was tampered."
   tools:
     - name: "upx decompress"
       binary: "upx"
@@ -87,7 +87,7 @@ match:
 tactics:
   phase: "Reverse Engineering (unpacking)"
   priority: 45
-  next_step: "High entropy suggests packing/encryption — dump from memory after the unpacking stub runs."
+  next_step: "High entropy suggests packing/encryption - dump from memory after the unpacking stub runs."
   tools:
     - name: "entropy scan"
       binary: "binwalk"
@@ -113,7 +113,7 @@ match:
 tactics:
   phase: "Reverse Engineering (.NET)"
   priority: 50
-  next_step: ".NET decompiles cleanly to near-source — use a CIL decompiler rather than a native disassembler."
+  next_step: ".NET decompiles cleanly to near-source - use a CIL decompiler rather than a native disassembler."
   tools:
     - name: "ilspycmd"
       binary: "ilspycmd"
@@ -140,7 +140,7 @@ match:
 tactics:
   phase: "Reverse Engineering (Go)"
   priority: 40
-  next_step: "Go strips conventionally but keeps a symbol table (gopclntab) — recover function names before analysis."
+  next_step: "Go strips conventionally but keeps a symbol table (gopclntab) - recover function names before analysis."
   tools:
     - name: "GoReSym"
       binary: "GoReSym"
@@ -218,7 +218,7 @@ match:
 tactics:
   phase: "Reverse Engineering (secrets)"
   priority: 35
-  next_step: "Embedded credentials/keys are a shortcut — extract and triage all high-value strings."
+  next_step: "Embedded credentials/keys are a shortcut - extract and triage all high-value strings."
   tools:
     - name: "strings + grep"
       binary: "strings"

@@ -11,7 +11,7 @@ func newInitCmd() *cobra.Command {
 		Use:   "init [zsh|bash]",
 		Short: "Print a shell integration widget (bind to a hotkey)",
 		Long: `Generates a non-intrusive shell widget. It does NOT run on every
-command — it binds a hotkey (Ctrl+Alt+A by default) that re-runs your last
+command - it binds a hotkey (Ctrl+Alt+A by default) that re-runs your last
 command, pipes its output through advsec, and prints suggestions beneath the
 prompt without touching your command buffer.
 
@@ -20,11 +20,15 @@ prompt without touching your command buffer.
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"zsh", "bash"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Lead with two newlines so that appending to a config file whose
+			// last line has no trailing newline (`... >> ~/.zshrc`) cannot fuse
+			// the opening marker onto that line and break the shell parser. Each
+			// snippet already ends with a trailing newline.
 			switch args[0] {
 			case "zsh":
-				fmt.Print(zshWidget)
+				fmt.Print("\n\n" + zshWidget)
 			case "bash":
-				fmt.Print(bashWidget)
+				fmt.Print("\n\n" + bashWidget)
 			default:
 				return fmt.Errorf("unsupported shell %q (use zsh or bash)", args[0])
 			}

@@ -1,4 +1,4 @@
-# RFC 822 / MIME email triage — scoped automatically when the input stream is
+# RFC 822 / MIME email triage - scoped automatically when the input stream is
 # classified as email/mime, so raw .eml never triggers unrelated attack rules.
 ---
 id: eml-header-analysis
@@ -52,7 +52,7 @@ match:
 tactics:
   phase: "Email Triage (Authentication)"
   priority: 65
-  next_step: "Verify SPF/DKIM/DMARC results — fail/softfail or an alignment mismatch is a strong spoofing signal."
+  next_step: "Verify SPF/DKIM/DMARC results - fail/softfail or an alignment mismatch is a strong spoofing signal."
   tools:
     - name: "auth-results grep"
       binary: "grep"

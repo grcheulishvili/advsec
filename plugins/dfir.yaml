@@ -1,4 +1,4 @@
-# Host incident-response plugins — live-triage patterns distinct from the
+# Host incident-response plugins - live-triage patterns distinct from the
 # detection rules in blueteam.yaml.
 ---
 id: dfir-reverse-shell
@@ -120,7 +120,7 @@ match:
 tactics:
   phase: "Incident Response (Activity)"
   priority: 50
-  next_step: "History-clearing is itself an IOC — recover shell history from all users and memory, and reconstruct actions."
+  next_step: "History-clearing is itself an IOC - recover shell history from all users and memory, and reconstruct actions."
   tools:
     - name: "all histories"
       binary: "find"
