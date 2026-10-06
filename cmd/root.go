@@ -5,11 +5,14 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/grcheulishvili/advsec/pkg/engine"
 )
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "0.2.0"
+	Version = "0.3.0"
 	Commit  = "dev"
 	Date    = "unknown"
 )
@@ -21,6 +24,10 @@ var (
 	flagJSON       bool
 	flagTop        int
 	flagMissing    bool
+	flagContext    string
+	flagSelect     bool
+	flagMinConf    int
+	flagAll        bool
 )
 
 var rootCmd = &cobra.Command{
@@ -60,11 +67,24 @@ func init() {
 	pf.StringVar(&flagPluginsDir, "plugins-dir", "", "additional plugin directory to search first")
 
 	// Analyze-oriented flags live on the root so `… | advsec --top N` works.
-	rootCmd.Flags().BoolVar(&flagJSON, "json", false, "emit machine-readable JSON instead of styled text")
-	rootCmd.Flags().IntVar(&flagTop, "top", 0, "limit output to the N highest-priority recommendations (0 = all)")
-	rootCmd.Flags().BoolVar(&flagMissing, "missing-only", false, "only show tools that are not installed locally")
+	addAnalyzeFlags(rootCmd.Flags())
 
 	rootCmd.AddCommand(newAnalyzeCmd())
 	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newUpdateCacheCmd())
+	rootCmd.AddCommand(newInitCmd())
+}
+
+// addAnalyzeFlags registers the analysis flags on a flag set so both the root
+// command (the default `… | advsec` path) and the explicit `analyze`
+// subcommand expose an identical interface.
+func addAnalyzeFlags(fs *pflag.FlagSet) {
+	fs.BoolVar(&flagJSON, "json", false, "emit machine-readable JSON instead of styled text")
+	fs.IntVar(&flagTop, "top", 0, "limit output to the N highest-priority recommendations (0 = all)")
+	fs.BoolVar(&flagMissing, "missing-only", false, "only show tools that are not installed locally")
+	fs.StringVarP(&flagContext, "context", "c", "", "scope rules to a domain (dfir, web, pwn, net, ad, sysadmin, crypto, cloud, ...)")
+	fs.StringVar(&flagContext, "domain", "", "alias for --context")
+	fs.BoolVarP(&flagSelect, "select", "i", false, "interactively pick the context before evaluating")
+	fs.IntVar(&flagMinConf, "min-confidence", engine.DefaultMinConfidence, "minimum match confidence to render (0 = show all)")
+	fs.BoolVarP(&flagAll, "all", "a", false, "show every match regardless of confidence (min-confidence=0)")
 }

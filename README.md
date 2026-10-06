@@ -56,11 +56,44 @@ Piping into `advsec` runs the analyzer (the default command):
 
 | Flag | Effect |
 |------|--------|
+| `-c, --context <domain>` / `--domain` | Scope rules to one domain (`dfir`, `web`, `pwn`, `net`, `ad`, `sysadmin`, `crypto`, `cloud`, …). Also via `$ADVSEC_CONTEXT`. |
+| `-i, --select` | Interactively pick the context before evaluation (reads `/dev/tty`) |
+| `--min-confidence N` | Minimum match confidence to render (default `2`) |
+| `-a, --all` | Show every match regardless of confidence |
 | `--top N` | Show only the N highest-priority recommendations |
 | `--missing-only` | Only show tools not installed locally (plus their install command) |
-| `--json` | Machine-readable output |
+| `--json` | Machine-readable output (includes `domain` and `confidence`) |
 | `--no-color` | Disable ANSI styling |
 | `-f, --input FILE` | Read from a file instead of stdin |
+
+### Context scoping
+
+Rules carry a `domain` (defaulting to their file stem). Scope evaluation to the
+job at hand — only that domain plus always-on `general` rules run:
+
+```sh
+journalctl -u ssh | advsec -c dfir      # incident response only
+ffuf ... | advsec -c web                # web only
+export ADVSEC_CONTEXT=ad                # pin a default (Active Directory)
+nmap ... | advsec -i                    # pick interactively
+```
+
+Aliases resolve to canonical domains (`net`→network, `ad`→redteam, `ir`→dfir,
+`k8s`→cloud, `re`→reversing, …). With no context set, advsec evaluates
+everything and, if results span multiple domains, prints a one-line scoping
+*suggestion* to stderr — it never switches context for you.
+
+### Shell integration
+
+`advsec init zsh` / `advsec init bash` emit a non-intrusive widget bound to
+**Ctrl+Alt+A**: it re-runs your last command, pipes the output through
+`advsec --top 3`, and prints suggestions beneath the prompt without touching
+your command buffer. It does **not** run on every command.
+
+```sh
+advsec init zsh  >> ~/.zshrc
+advsec init bash >> ~/.bashrc
+```
 
 ### Plugin management
 
@@ -78,15 +111,22 @@ advsec update-cache                     # refresh OS package mapping database
 
 1. **Parse** — a bounded 2 MB streaming buffer reads stdin and extracts IPs,
    domains, URLs, ports, file headers, protocol banners, hashes, memory
-   addresses, and CVEs with a fast RE2 engine.
-2. **Match** — each plugin's `match.rules` (regex / substring / entity-type) are
-   evaluated with `all`/`any` logic against the input.
-3. **Evaluate** — matched plugins are ranked by priority, command placeholders
-   (`{target}`, `{target_ip}`, `{target_port}`, …) are expanded from parsed
-   entities, and each recommended tool is checked against `PATH`.
-4. **Recommend** — prioritized phases, next steps, and ready-to-run commands are
-   printed; missing tools come with the exact native install command for the
-   detected distro (`pacman`/`yay` on Arch, `apt` on Debian/Kali).
+   addresses, and CVEs. Every IP is validated with `net.ParseIP`; loopback/bind
+   addresses and reverse-DNS zones are suppressed; hex values only count as
+   memory addresses inside genuine debugger/pwn output (so `0x8007000D`-style
+   error codes don't masquerade as pointers).
+2. **Scope** — if a context is set (`-c`, `$ADVSEC_CONTEXT`, or `--select`),
+   only that domain's rules plus always-on `general` rules are evaluated.
+3. **Match + score** — each plugin's `match.rules` (regex / substring /
+   entity-type) run with `all`/`any` logic; matched rules accrue a confidence
+   weight, and matches below `--min-confidence` (default 2) are suppressed to
+   kill incidental false positives.
+4. **Evaluate** — matches are ranked by priority, command placeholders
+   (`{target}`, `{target_ip}`, …) are expanded, and each tool is checked
+   against `PATH`.
+5. **Recommend** — phases, objectives, and ready-to-run commands are printed;
+   missing tools come with the exact native install command (`pacman`/`yay` on
+   Arch, `apt` on Debian/Kali) or a pip/go/cargo hint when not distro-packaged.
 
 ---
 
@@ -111,6 +151,7 @@ CTF, cloud/container, wireless, and day-to-day sysadmin triage.
 id: pwn-elf64-exec-stack          # unique, required
 name: ELF 64-bit (Executable Stack)
 target_type: binary
+domain: pwn                       # optional; defaults to the file stem. Used by -c/--context
 author: official
 os_packages:                      # family -> packages providing the tools
   arch:   [checksec, gdb, radare2]
@@ -155,7 +196,7 @@ Unmatched placeholders are left intact so you can see what still needs filling.
 ```
 advsec/
 ├── main.go
-├── cmd/            root, analyze, plugin commands (cobra)
+├── cmd/            root, analyze, plugin, init commands + render/select (cobra)
 ├── pkg/
 │   ├── engine/     parser, matcher, evaluator
 │   ├── osdetect/   distro detection + package manager mapping

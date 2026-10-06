@@ -2,8 +2,9 @@
 # IDS/EDR alerts, and IOC material.
 ---
 id: bt-ioc-hash
-name: "IOC Hash (Reputation Triage)"
+name: "File Hash Present (Reputation Check)"
 target_type: blueteam
+domain: general
 author: official
 os_packages:
   arch: [yara]

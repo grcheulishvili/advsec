@@ -10,6 +10,10 @@ type Plugin struct {
 	Name string `yaml:"name"`
 	// TargetType is a free-form classification (binary, web, network, host...).
 	TargetType string `yaml:"target_type"`
+	// Domain is the operational category used for context scoping (dfir, web,
+	// pwn, network, redteam, ...). When empty it defaults at load time to the
+	// stem of the file the plugin was loaded from.
+	Domain string `yaml:"domain"`
 	// Author identifies the plugin source ("official", "community", handle...).
 	Author string `yaml:"author"`
 	// OSPackages maps a distribution family key (arch, debian, kali) to the

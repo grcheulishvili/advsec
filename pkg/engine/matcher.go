@@ -15,7 +15,16 @@ type Match struct {
 	TotalRules   int
 	// Score is the ranking weight used to order recommendations.
 	Score int
+	// Confidence is the summed weight of the matched rules (regex/entity rules
+	// weigh more than short literal substrings). The evaluator/CLI gates
+	// rendering on a minimum confidence to suppress weak, incidental matches.
+	Confidence int
 }
+
+// DefaultMinConfidence is the default rendering threshold. A single specific
+// rule (regex or entity_type, weight 2) clears it; a single short literal
+// substring (weight 1) does not.
+const DefaultMinConfidence = 2
 
 // compiledRule caches the compiled regex for a rule so repeated matches
 // across many input lines stay cheap.
@@ -63,7 +72,7 @@ func NewMatcher(plugins []plugin.Plugin) *Matcher {
 func (m *Matcher) Evaluate(ctx *Context) []Match {
 	var out []Match
 	for _, p := range m.plugins {
-		matched, total := evaluatePlugin(p, ctx)
+		matched, total, confidence := evaluatePlugin(p, ctx)
 		logic := strings.ToLower(strings.TrimSpace(p.Match.Logic))
 		if logic == "" {
 			logic = "all"
@@ -83,20 +92,41 @@ func (m *Matcher) Evaluate(ctx *Context) []Match {
 			MatchedRules: matched,
 			TotalRules:   total,
 			Score:        score(p, matched, total),
+			Confidence:   confidence,
 		})
 	}
 	return out
 }
 
-// evaluatePlugin counts how many of a plugin's rules fire against ctx.
-func evaluatePlugin(p plugin.Plugin, ctx *Context) (matched, total int) {
+// evaluatePlugin counts how many of a plugin's rules fire against ctx and sums
+// their confidence weights.
+func evaluatePlugin(p plugin.Plugin, ctx *Context) (matched, total, confidence int) {
 	for _, r := range p.Match.Rules {
 		total++
 		if ruleMatches(r, ctx) {
 			matched++
+			confidence += ruleWeight(r)
 		}
 	}
-	return matched, total
+	return matched, total, confidence
+}
+
+// ruleWeight assigns a confidence weight to a matched rule. Specific rules
+// (regex, entity_type) and longer literal substrings are trustworthy; very
+// short literals are weak and weigh less.
+func ruleWeight(r plugin.Rule) int {
+	switch {
+	case r.Regex != "":
+		return 2
+	case r.EntityType != "":
+		return 2
+	case r.Contains != "":
+		if len([]rune(strings.TrimSpace(r.Contains))) >= 5 {
+			return 2
+		}
+		return 1
+	}
+	return 0
 }
 
 func ruleMatches(r plugin.Rule, ctx *Context) bool {

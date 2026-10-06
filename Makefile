@@ -3,7 +3,7 @@ BINARY      := advsec
 PKG         := github.com/grcheulishvili/advsec
 CMD_PKG     := $(PKG)/cmd
 
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.0)
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.3.0)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 DATE        ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -46,9 +46,9 @@ fmt:
 tidy:
 	$(GO) mod tidy
 
-## run: build and analyze a sample (echo piped in)
+## run: build and analyze a sample against the in-repo plugins
 run: build
-	@printf 'ELF 64-bit LSB executable, x86-64, not stripped\n' | ./bin/$(BINARY)
+	@printf 'ELF 64-bit LSB executable, x86-64, not stripped, executable stack\n' | ./bin/$(BINARY) --plugins-dir ./plugins
 
 ## install: install binary + bundled plugins system-wide
 install: build

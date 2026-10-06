@@ -56,10 +56,102 @@ func TestParseIPv6AndDomain(t *testing.T) {
 }
 
 func TestInvalidIPv4Rejected(t *testing.T) {
-	ctx := ParseString("version 999.1.2.3 and 1.2.3.4")
+	ctx := ParseString("version 999.1.2.3 and 8.8.4.4")
 	ips := ctx.Entities[EntityIP]
-	if len(ips) != 1 || ips[0] != "1.2.3.4" {
-		t.Fatalf("ips = %v, want [1.2.3.4]", ips)
+	if len(ips) != 1 || ips[0] != "8.8.4.4" {
+		t.Fatalf("ips = %v, want [8.8.4.4]", ips)
+	}
+}
+
+// --- Parser hardening (v0.3.0) ---
+
+func TestHexErrorCodeNotAddress(t *testing.T) {
+	// A Windows HRESULT in ordinary output must NOT become an ipv4/ipv6/mem_addr.
+	ctx := ParseString("Installation failed with error 0x8007000D (ERROR_INVALID_DATA)")
+	if ctx.Has(EntityMemAddr) {
+		t.Fatalf("hex error code parsed as mem_addr: %v", ctx.Entities[EntityMemAddr])
+	}
+	if ctx.Has(EntityIP) || ctx.Has(EntityIPv6) {
+		t.Fatalf("hex error code parsed as an IP: v4=%v v6=%v",
+			ctx.Entities[EntityIP], ctx.Entities[EntityIPv6])
+	}
+}
+
+func TestHexAddressInDebuggerContext(t *testing.T) {
+	// In a real gdb/pwn dump, hex values ARE memory addresses.
+	dump := "Program received signal SIGSEGV\n0x00007ffff7a0d1c2 in __libc_start_main\nrip 0x401136 rsp 0x7fffffffe2a0"
+	ctx := ParseString(dump)
+	if !ctx.Has(EntityMemAddr) {
+		t.Fatalf("expected mem_addr in debugger context, got none")
+	}
+}
+
+func TestLoopbackAndBindSuppressed(t *testing.T) {
+	ctx := ParseString("bound to 0.0.0.0, serving on 127.0.0.1 and ::1 (localhost)")
+	if ctx.Has(EntityIP) {
+		t.Fatalf("loopback/bind IPv4 not suppressed: %v", ctx.Entities[EntityIP])
+	}
+	if ctx.Has(EntityIPv6) {
+		t.Fatalf("::1 not suppressed: %v", ctx.Entities[EntityIPv6])
+	}
+	if ctx.ExternalTarget {
+		t.Fatalf("pure-loopback input should not flag an external target")
+	}
+}
+
+func TestExternalTargetFlag(t *testing.T) {
+	ctx := ParseString("listening on 127.0.0.1 but connected to 93.184.216.34")
+	if !ctx.ExternalTarget {
+		t.Fatalf("routable IP should set ExternalTarget")
+	}
+	if ctx.First(EntityIP) != "93.184.216.34" {
+		t.Fatalf("ip = %q, want the routable one", ctx.First(EntityIP))
+	}
+}
+
+func TestStrictIPv6RejectsJunk(t *testing.T) {
+	// "C:c:F:" and similar debugger/path fragments must not parse as IPv6.
+	ctx := ParseString("mov eax, C:c:F: ; path C:\\Users ; group 10:00:30")
+	if ctx.Has(EntityIPv6) {
+		t.Fatalf("junk parsed as ipv6: %v", ctx.Entities[EntityIPv6])
+	}
+}
+
+func TestValidIPv6Accepted(t *testing.T) {
+	ctx := ParseString("peer 2001:db8:85a3::8a2e:370:7334 established")
+	if !ctx.Has(EntityIPv6) {
+		t.Fatalf("valid ipv6 not detected")
+	}
+}
+
+func TestReverseDNSNotDomain(t *testing.T) {
+	ctx := ParseString("PTR query for 34.216.184.93.in-addr.arpa")
+	for _, d := range ctx.Entities[EntityDomain] {
+		if strings.HasSuffix(d, "arpa") {
+			t.Fatalf("reverse-dns zone parsed as domain: %v", ctx.Entities[EntityDomain])
+		}
+	}
+}
+
+func TestConfidenceWeights(t *testing.T) {
+	// A single short literal is weak; a regex rule is strong.
+	weak := NewMatcher([]plugin.Plugin{{
+		ID: "weak", Name: "w", Domain: "general",
+		Match:   plugin.Match{Logic: "any", Rules: []plugin.Rule{{Contains: "err"}}},
+		Tactics: plugin.Tactics{Phase: "p", NextStep: "n", Tools: []plugin.Tool{{Name: "x", Command: "x"}}},
+	}})
+	m := weak.Evaluate(ParseString("err"))
+	if len(m) != 1 || m[0].Confidence >= 2 {
+		t.Fatalf("short literal should be low confidence, got %+v", m)
+	}
+	strong := NewMatcher([]plugin.Plugin{{
+		ID: "strong", Name: "s", Domain: "general",
+		Match:   plugin.Match{Logic: "any", Rules: []plugin.Rule{{Regex: "ELF 64-bit"}}},
+		Tactics: plugin.Tactics{Phase: "p", NextStep: "n", Tools: []plugin.Tool{{Name: "x", Command: "x"}}},
+	}})
+	m2 := strong.Evaluate(ParseString("ELF 64-bit LSB"))
+	if len(m2) != 1 || m2[0].Confidence < 2 {
+		t.Fatalf("regex rule should clear threshold, got %+v", m2)
 	}
 }
 
@@ -130,8 +222,8 @@ func TestEvaluatorExpandsAndRecommendsInstall(t *testing.T) {
 func TestEvaluatorUsesInstallHintWhenNoPackage(t *testing.T) {
 	host := osdetect.HostInfo{Family: osdetect.FamilyDebian, Manager: debianManager()}
 	p := plugin.Plugin{
-		ID:   "t-pipx",
-		Name: "pip tool",
+		ID:    "t-pipx",
+		Name:  "pip tool",
 		Match: plugin.Match{Logic: "any", Rules: []plugin.Rule{{Contains: "impacket"}}},
 		Tactics: plugin.Tactics{
 			Phase: "AD", NextStep: "relay",

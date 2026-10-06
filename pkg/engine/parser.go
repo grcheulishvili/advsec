@@ -5,6 +5,7 @@ package engine
 import (
 	"bufio"
 	"io"
+	"net"
 	"regexp"
 	"sort"
 	"strings"
@@ -39,6 +40,10 @@ type Context struct {
 	Raw string
 	// Truncated is true if input exceeded MaxBufferBytes.
 	Truncated bool
+	// ExternalTarget is true when at least one routable (non-loopback,
+	// non-bind, non-private-noise) IP, IPv6, domain, or URL was found. Network
+	// attack rules can consult this to avoid firing on pure-localhost output.
+	ExternalTarget bool
 	// Entities maps an EntityKind to the ordered, deduplicated values found.
 	Entities map[EntityKind][]string
 }
@@ -60,8 +65,12 @@ var (
 	// reIPv4 matches dotted-quad addresses. Octet range is validated in a
 	// post-filter to keep the expression fast and readable.
 	reIPv4 = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	// reIPv6 matches common IPv6 forms including compressed "::".
-	reIPv6 = regexp.MustCompile(`\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{0,4}\b|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}`)
+	// reIPv6 is a permissive *candidate* matcher — anything that looks roughly
+	// like an IPv6 address. Every candidate is then validated with
+	// net.ParseIP, which enforces the real 8-group / compression grammar and
+	// eliminates junk like "C:c:F:" or register dumps. The candidate requires
+	// at least one "::" or two colons with a hex group on each side.
+	reIPv6 = regexp.MustCompile(`\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f]{1,4}\b|\b(?:[0-9A-Fa-f]{1,4}:){1,}:(?:[0-9A-Fa-f]{1,4})?\b|::(?:[0-9A-Fa-f]{1,4}:)*[0-9A-Fa-f]{1,4}`)
 	// reURL matches http/https/ftp URLs.
 	reURL = regexp.MustCompile(`\b(?:https?|ftp)://[^\s"'<>) ]+`)
 	// reDomain matches hostnames with a TLD of 2+ letters.
@@ -82,7 +91,25 @@ var (
 	reCVE = regexp.MustCompile(`\bCVE-\d{4}-\d{4,7}\b`)
 	// reEmail matches email addresses.
 	reEmail = regexp.MustCompile(`\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,24}\b`)
+	// reDebugCtx detects debugger / pwn memory-dump context. Only then are bare
+	// hex values treated as memory addresses (otherwise 0x8007000D-style error
+	// codes would masquerade as pointers).
+	reDebugCtx = regexp.MustCompile(`(?i)\b(?:r[a-ds]x|r[sbi]p|rsi|rdi|r8|r9|r1[0-5]|e[a-d]x|e[sb]p|eip|gdb|pwndbg|\bgef\b|\$pc\b|backtrace|#\d+\s+0x|Program received signal|SIGSEGV|vmmap|got\b|plt\b)`)
 )
+
+// loopbackOrBind reports whether an IP string is a loopback / unspecified /
+// bind-only address that should not drive network attack recommendations.
+func loopbackOrBind(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "0.0.0.0", "127.0.0.1", "::", "::1", "0:0:0:0:0:0:0:1", "localhost":
+		return true
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsUnspecified()
+}
 
 // commonTLDNoise filters out dotted tokens that look like domains but are
 // almost certainly filenames or version strings.
@@ -147,23 +174,48 @@ func ParseString(raw string) *Context {
 		}
 	}
 
-	// URLs first so their host parts don't pollute bare-domain extraction.
-	urls := reURL.FindAllString(raw, -1)
-	add(EntityURL, urls...)
+	external := false
 
+	// URLs first so their host parts don't pollute bare-domain extraction.
+	for _, u := range reURL.FindAllString(raw, -1) {
+		add(EntityURL, u)
+		if !urlIsLocal(u) {
+			external = true
+		}
+	}
+
+	// IPv4: validate with net.ParseIP, then suppress loopback/bind addresses
+	// from the target list (they are not useful attack targets).
 	for _, m := range reIPv4.FindAllString(raw, -1) {
-		if isValidIPv4(m) {
-			add(EntityIP, m)
+		ip := net.ParseIP(m)
+		if ip == nil || ip.To4() == nil {
+			continue
 		}
+		if loopbackOrBind(m) {
+			continue
+		}
+		add(EntityIP, m)
+		external = true
 	}
+
+	// IPv6: candidate regex then strict net.ParseIP validation.
 	for _, m := range reIPv6.FindAllString(raw, -1) {
-		if isPlausibleIPv6(m) {
-			add(EntityIPv6, m)
+		ip := net.ParseIP(m)
+		if ip == nil || ip.To4() != nil { // reject invalid and IPv4-in-IPv6 noise
+			continue
 		}
+		if loopbackOrBind(m) {
+			continue
+		}
+		add(EntityIPv6, m)
+		external = true
 	}
+
 	for _, m := range reDomain.FindAllString(raw, -1) {
 		if isPlausibleDomain(m) {
-			add(EntityDomain, strings.ToLower(m))
+			d := strings.ToLower(m)
+			add(EntityDomain, d)
+			external = true
 		}
 	}
 	for _, m := range rePortNmap.FindAllStringSubmatch(raw, -1) {
@@ -177,9 +229,17 @@ func ParseString(raw string) *Context {
 		}
 	}
 	add(EntityHash, reHash.FindAllString(raw, -1)...)
-	add(EntityMemAddr, reMemAddr.FindAllString(raw, -1)...)
+
+	// Memory addresses: only when the input is actually a debugger / pwn dump.
+	// Otherwise hex values (Windows HRESULTs like 0x8007000D, color codes,
+	// offsets in source) are left alone instead of posing as pointers.
+	if reDebugCtx.MatchString(raw) {
+		add(EntityMemAddr, reMemAddr.FindAllString(raw, -1)...)
+	}
+
 	add(EntityCVE, reCVE.FindAllString(raw, -1)...)
 	add(EntityEmail, reEmail.FindAllString(raw, -1)...)
+	ctx.ExternalTarget = external
 
 	// Keep port output stable and human-friendly.
 	if ports := ctx.Entities[EntityPort]; len(ports) > 1 {
@@ -201,21 +261,13 @@ func appendUnique(s []string, v string) []string {
 	return append(s, v)
 }
 
-func isValidIPv4(s string) bool {
-	parts := strings.Split(s, ".")
-	if len(parts) != 4 {
-		return false
-	}
-	for _, p := range parts {
-		n := atoiSafe(p)
-		if n < 0 || n > 255 {
-			return false
-		}
-		if len(p) > 1 && p[0] == '0' {
-			return false // reject leading-zero octets (likely version strings)
-		}
-	}
-	return true
+// urlIsLocal reports whether a URL points at localhost/loopback.
+func urlIsLocal(u string) bool {
+	low := strings.ToLower(u)
+	return strings.Contains(low, "://localhost") ||
+		strings.Contains(low, "://127.0.0.1") ||
+		strings.Contains(low, "://[::1]") ||
+		strings.Contains(low, "://0.0.0.0")
 }
 
 func isValidPort(s string) bool {
@@ -226,27 +278,15 @@ func isValidPort(s string) bool {
 	return n > 0 && n <= 65535
 }
 
-// isPlausibleIPv6 filters the IPv6 regex's output to reject clock times and
-// other all-decimal colon sequences. A candidate qualifies only if it uses
-// "::" compression, or has a hextet containing a hex letter, or has at least
-// three colons (true IPv6 segments), which excludes HH:MM:SS (two colons).
-func isPlausibleIPv6(s string) bool {
-	if s == "" || s == "::" {
-		return false
-	}
-	if strings.Contains(s, "::") {
-		return true
-	}
-	colons := strings.Count(s, ":")
-	if colons < 2 {
-		return false
-	}
-	hasHexLetter := strings.ContainsAny(s, "abcdefABCDEF")
-	return hasHexLetter || colons >= 3
-}
-
 func isPlausibleDomain(s string) bool {
 	s = strings.ToLower(s)
+	// Reverse-DNS zones are not attack-surface domains.
+	if strings.HasSuffix(s, "in-addr.arpa") || strings.HasSuffix(s, "ip6.arpa") {
+		return false
+	}
+	if s == "localhost" {
+		return false
+	}
 	// An all-numeric final label means it's really an IPv4 caught by the
 	// domain regex; skip it.
 	idx := strings.LastIndex(s, ".")

@@ -124,6 +124,13 @@ func LoadFromDirs(dirs []string) LoadResult {
 				seen[p.ID] = true
 				p.SourcePath = path
 				p.Origin = originFor(dir)
+				if p.Domain == "" {
+					// Default the domain to the file stem (e.g. dfir.yaml -> dfir).
+					base := filepath.Base(path)
+					p.Domain = strings.ToLower(strings.TrimSuffix(base, filepath.Ext(base)))
+				} else {
+					p.Domain = CanonicalDomain(p.Domain)
+				}
 				res.Plugins = append(res.Plugins, p)
 			}
 		}

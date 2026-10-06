@@ -21,12 +21,14 @@ type ToolRec struct {
 // Recommendation is a matched plugin rendered into actionable output for a
 // specific host.
 type Recommendation struct {
-	PluginID string
-	Name     string
-	Phase    string
-	NextStep string
-	Score    int
-	Tools    []ToolRec
+	PluginID   string
+	Name       string
+	Domain     string
+	Phase      string
+	NextStep   string
+	Score      int
+	Confidence int
+	Tools      []ToolRec
 }
 
 // Report is the complete evaluation result for one parsed input.
@@ -61,11 +63,13 @@ func (e *Evaluator) Evaluate(ctx *Context, matches []Match) *Report {
 
 	for _, m := range matches {
 		rec := Recommendation{
-			PluginID: m.Plugin.ID,
-			Name:     m.Plugin.Name,
-			Phase:    m.Plugin.Tactics.Phase,
-			NextStep: m.Plugin.Tactics.NextStep,
-			Score:    m.Score,
+			PluginID:   m.Plugin.ID,
+			Name:       m.Plugin.Name,
+			Domain:     m.Plugin.Domain,
+			Phase:      m.Plugin.Tactics.Phase,
+			NextStep:   m.Plugin.Tactics.NextStep,
+			Score:      m.Score,
+			Confidence: m.Confidence,
 		}
 		for _, t := range m.Plugin.Tactics.Tools {
 			rec.Tools = append(rec.Tools, e.resolveTool(t, m.Plugin, ctx))

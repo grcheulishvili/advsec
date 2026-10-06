@@ -7,13 +7,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/grcheulishvili/advsec/pkg/engine"
 	"github.com/grcheulishvili/advsec/pkg/osdetect"
 	"github.com/grcheulishvili/advsec/pkg/plugin"
 )
+
+// EnvContext lets the user pin a default context (e.g. export ADVSEC_CONTEXT=dfir).
+const EnvContext = "ADVSEC_CONTEXT"
 
 var flagInputFile string
 
@@ -25,11 +27,19 @@ func newAnalyzeCmd() *cobra.Command {
 matches it against the plugin matrix, and prints prioritized recommendations.`,
 		RunE: runAnalyze,
 	}
-	c.Flags().BoolVar(&flagJSON, "json", false, "emit machine-readable JSON instead of styled text")
-	c.Flags().IntVar(&flagTop, "top", 0, "limit output to the N highest-priority recommendations (0 = all)")
-	c.Flags().BoolVar(&flagMissing, "missing-only", false, "only show tools that are not installed locally")
+	addAnalyzeFlags(c.Flags())
 	c.Flags().StringVarP(&flagInputFile, "input", "f", "", "read input from FILE instead of stdin")
 	return c
+}
+
+// resolveContext determines the active context from (in priority order) the
+// --context/--domain flag, then $ADVSEC_CONTEXT. The result is canonicalized.
+func resolveContext() string {
+	raw := flagContext
+	if raw == "" {
+		raw = os.Getenv(EnvContext)
+	}
+	return plugin.CanonicalDomain(raw)
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
@@ -53,8 +63,41 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "advsec: warning: "+e.Error())
 	}
 
-	matcher := engine.NewMatcher(load.Plugins)
+	// Resolve context: flag/env, or an interactive picker with --select.
+	activeCtx := resolveContext()
+	if flagSelect {
+		picked, perr := selectContext(plugin.AvailableDomains(load.Plugins), activeCtx)
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, "advsec: "+perr.Error())
+		} else {
+			activeCtx = picked
+		}
+	}
+	if activeCtx != "" && !plugin.IsKnownDomain(activeCtx) {
+		fmt.Fprintf(os.Stderr, "advsec: warning: unknown context %q; evaluating all domains\n", activeCtx)
+		activeCtx = ""
+	}
+
+	plugins := plugin.FilterByContext(load.Plugins, activeCtx)
+
+	matcher := engine.NewMatcher(plugins)
 	matches := matcher.Evaluate(ctx)
+
+	// Confidence gate (suppresses weak, incidental matches).
+	minConf := flagMinConf
+	if flagAll {
+		minConf = 0
+	}
+	if minConf > 0 {
+		kept := matches[:0]
+		for _, m := range matches {
+			if m.Confidence >= minConf {
+				kept = append(kept, m)
+			}
+		}
+		matches = kept
+	}
+
 	report := engine.NewEvaluator(host).Evaluate(ctx, matches)
 
 	if flagTop > 0 && len(report.Recommendations) > flagTop {
@@ -65,9 +108,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	if flagJSON {
-		return emitJSON(report)
+		return emitJSON(report, activeCtx)
 	}
-	renderText(os.Stdout, report, len(load.Plugins))
+	renderText(os.Stdout, report, activeCtx)
 	return nil
 }
 
@@ -79,17 +122,15 @@ func readInput() (string, error) {
 		}
 		return string(data), nil
 	}
-	// Only read stdin when it is actually piped/redirected; a bare TTY would
-	// block forever.
 	st, _ := os.Stdin.Stat()
 	if st != nil && (st.Mode()&os.ModeCharDevice) != 0 {
 		return "", fmt.Errorf("no input: pipe data in (e.g. `nmap -sV host | advsec`) or use --input FILE")
 	}
-	ctx, err := engine.Parse(io.Reader(os.Stdin))
+	c, err := engine.Parse(io.Reader(os.Stdin))
 	if err != nil {
 		return "", err
 	}
-	return ctx.Raw, nil
+	return c.Raw, nil
 }
 
 func filterMissing(r *engine.Report) {
@@ -121,16 +162,19 @@ type jsonTool struct {
 }
 
 type jsonRec struct {
-	PluginID string     `json:"plugin_id"`
-	Name     string     `json:"name"`
-	Phase    string     `json:"phase"`
-	NextStep string     `json:"next_step"`
-	Score    int        `json:"score"`
-	Tools    []jsonTool `json:"tools"`
+	PluginID   string     `json:"plugin_id"`
+	Name       string     `json:"name"`
+	Domain     string     `json:"domain"`
+	Phase      string     `json:"phase"`
+	NextStep   string     `json:"next_step"`
+	Score      int        `json:"score"`
+	Confidence int        `json:"confidence"`
+	Tools      []jsonTool `json:"tools"`
 }
 
 type jsonReport struct {
-	Host struct {
+	Context string `json:"context,omitempty"`
+	Host    struct {
 		ID         string `json:"id"`
 		PrettyName string `json:"pretty_name"`
 		Family     string `json:"family"`
@@ -140,8 +184,9 @@ type jsonReport struct {
 	Recommendations []jsonRec           `json:"recommendations"`
 }
 
-func emitJSON(r *engine.Report) error {
+func emitJSON(r *engine.Report, activeCtx string) error {
 	var jr jsonReport
+	jr.Context = activeCtx
 	jr.Host.ID = r.Host.ID
 	jr.Host.PrettyName = r.Host.PrettyName
 	jr.Host.Family = string(r.Host.Family)
@@ -152,11 +197,8 @@ func emitJSON(r *engine.Report) error {
 	}
 	for _, rec := range r.Recommendations {
 		j := jsonRec{
-			PluginID: rec.PluginID,
-			Name:     rec.Name,
-			Phase:    rec.Phase,
-			NextStep: rec.NextStep,
-			Score:    rec.Score,
+			PluginID: rec.PluginID, Name: rec.Name, Domain: rec.Domain,
+			Phase: rec.Phase, NextStep: rec.NextStep, Score: rec.Score, Confidence: rec.Confidence,
 		}
 		for _, t := range rec.Tools {
 			j.Tools = append(j.Tools, jsonTool{
@@ -169,128 +211,4 @@ func emitJSON(r *engine.Report) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(jr)
-}
-
-// ---- styled text output ----
-
-func renderText(w io.Writer, r *engine.Report, pluginCount int) {
-	styles := newStyles(!flagNoColor && isTTY(w))
-
-	// Header / host line.
-	fmt.Fprintln(w, styles.title.Render(" advsec ")+" "+styles.dim.Render(
-		fmt.Sprintf("%s · %s · %d plugins", orUnknown(r.Host.PrettyName), r.Host.Manager.Name, pluginCount)))
-
-	// Parsed entities summary.
-	if sum := entitySummary(r.Context); sum != "" {
-		fmt.Fprintln(w, styles.dim.Render("detected: ")+sum)
-	}
-
-	if len(r.Recommendations) == 0 {
-		fmt.Fprintln(w, styles.warn.Render("No matching plugins for this input."))
-		fmt.Fprintln(w, styles.dim.Render("Add rules under "+plugin.UserPluginDir()+" or run `advsec plugin update`."))
-		return
-	}
-
-	for i, rec := range r.Recommendations {
-		fmt.Fprintln(w)
-		head := fmt.Sprintf("%d. %s", i+1, rec.Name)
-		fmt.Fprintln(w, styles.rec.Render(head)+"  "+styles.badge.Render(rec.Phase))
-		if rec.NextStep != "" {
-			fmt.Fprintln(w, "   "+styles.step.Render("→ "+rec.NextStep))
-		}
-		for _, t := range rec.Tools {
-			renderTool(w, styles, t)
-		}
-	}
-}
-
-func renderTool(w io.Writer, s styles, t engine.ToolRec) {
-	mark := s.ok.Render("●")
-	status := ""
-	if !t.Installed {
-		mark = s.miss.Render("○")
-		status = s.miss.Render(" [not installed]")
-	}
-	fmt.Fprintf(w, "   %s %s%s\n", mark, s.toolName.Render(t.Name), status)
-	if t.Purpose != "" {
-		fmt.Fprintln(w, "       "+s.dim.Render(t.Purpose))
-	}
-	if t.Command != "" {
-		fmt.Fprintln(w, "       "+s.cmd.Render("$ "+t.Command))
-	}
-	if !t.Installed && t.InstallCommand != "" {
-		fmt.Fprintln(w, "       "+s.install.Render("install: "+t.InstallCommand))
-	}
-}
-
-func entitySummary(ctx *engine.Context) string {
-	order := []struct {
-		kind  engine.EntityKind
-		label string
-	}{
-		{engine.EntityIP, "ip"}, {engine.EntityIPv6, "ipv6"}, {engine.EntityDomain, "domain"},
-		{engine.EntityURL, "url"}, {engine.EntityPort, "port"}, {engine.EntityHash, "hash"},
-		{engine.EntityMemAddr, "addr"}, {engine.EntityCVE, "cve"}, {engine.EntityEmail, "email"},
-	}
-	var parts []string
-	for _, o := range order {
-		if vals := ctx.Entities[o.kind]; len(vals) > 0 {
-			show := vals
-			if len(show) > 3 {
-				show = append(append([]string{}, show[:3]...), fmt.Sprintf("+%d", len(vals)-3))
-			}
-			parts = append(parts, fmt.Sprintf("%s=%s", o.label, strings.Join(show, ",")))
-		}
-	}
-	return strings.Join(parts, "  ")
-}
-
-func orUnknown(s string) string {
-	if s == "" {
-		return "unknown OS"
-	}
-	return s
-}
-
-// ---- styling ----
-
-type styles struct {
-	title, dim, rec, badge, step, toolName, cmd, install, ok, miss, warn lipgloss.Style
-}
-
-func newStyles(color bool) styles {
-	if !color {
-		// Return attribute-free styles so Render is an identity function and
-		// no ANSI escape codes are emitted at all.
-		plain := lipgloss.NewStyle()
-		return styles{
-			title: plain, dim: plain, rec: plain, badge: plain, step: plain,
-			toolName: plain, cmd: plain, install: plain, ok: plain, miss: plain, warn: plain,
-		}
-	}
-	return styles{
-		title:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("63")),
-		dim:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
-		rec:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81")),
-		badge:    lipgloss.NewStyle().Foreground(lipgloss.Color("213")),
-		step:     lipgloss.NewStyle().Foreground(lipgloss.Color("228")),
-		toolName: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")),
-		cmd:      lipgloss.NewStyle().Foreground(lipgloss.Color("150")),
-		install:  lipgloss.NewStyle().Foreground(lipgloss.Color("209")),
-		ok:       lipgloss.NewStyle().Foreground(lipgloss.Color("76")),
-		miss:     lipgloss.NewStyle().Foreground(lipgloss.Color("203")),
-		warn:     lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-	}
-}
-
-func isTTY(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	st, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return (st.Mode() & os.ModeCharDevice) != 0
 }
