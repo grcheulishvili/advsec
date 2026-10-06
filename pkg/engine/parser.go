@@ -11,6 +11,11 @@ import (
 	"strings"
 )
 
+// ExtractFromLists, when true, makes the parser mine entities (IPs, hashes,
+// domains) even from list-style streams (wordlists/payloads/paths). The CLI
+// sets this from the --all flag; it defaults off so list lines are not targets.
+var ExtractFromLists bool
+
 // MaxBufferBytes is the upper bound on how much piped input advsec will read.
 // The spec calls for a non-blocking 2MB streaming buffer so that a very
 // chatty upstream (e.g. `journalctl -f`) cannot deadlock the pipe or exhaust
@@ -187,6 +192,12 @@ func ParseString(raw string) *Context {
 	// advsec's own output / help text carries only example placeholders, never
 	// real targets - skip extraction entirely.
 	if ctx.Format == FormatAdvsecOutput {
+		return ctx
+	}
+	// Wordlists / payload lists / path lists are data to feed to fuzzers, not
+	// targets: individual lines are not mined for IPs/hashes/domains unless the
+	// caller opts in with --all (engine.ExtractFromLists).
+	if IsListFormat(ctx.Format) && !ExtractFromLists {
 		return ctx
 	}
 
@@ -404,26 +415,10 @@ func isPlausibleDomain(s string) bool {
 	if strings.HasSuffix(s, "in-addr.arpa") || strings.HasSuffix(s, "ip6.arpa") {
 		return false
 	}
-	if s == "localhost" {
-		return false
-	}
-	// An all-numeric final label means it's really an IPv4 caught by the
-	// domain regex; skip it.
-	idx := strings.LastIndex(s, ".")
-	if idx < 0 || idx == len(s)-1 {
-		return false
-	}
-	tld := s[idx+1:]
-	if fileyTLDs[tld] {
-		return false
-	}
-	// Reject tokens whose TLD is numeric.
-	for _, r := range tld {
-		if r < 'a' || r > 'z' {
-			return false
-		}
-	}
-	return true
+	// A candidate is a domain ONLY if its final label is a real TLD (or an
+	// accepted internal suffix). This rejects filenames (anaconda.xlog,
+	// script.php) and arbitrary dotted tokens.
+	return IsValidDomain(s)
 }
 
 func atoiSafe(s string) int {

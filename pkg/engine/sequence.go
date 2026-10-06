@@ -17,20 +17,28 @@ const (
 	IntentContainment Intent = "Immediate Containment"
 )
 
-// InferIntent derives the primary objective from the parsed context.
+// InferIntent derives the primary objective from the parsed context. Intent is
+// never inferred from list-style streams or advsec's own output - a 32-char
+// string inside a wordlist must not trigger crash-dump triage.
 func InferIntent(ctx *Context) Intent {
-	// A lone hash with no other routable target → reputation / IOC search.
+	if IsListFormat(ctx.Format) || ctx.Format == FormatAdvsecOutput {
+		return IntentNone
+	}
+	// A lone hash with no other routable target -> reputation / IOC search.
 	if len(ctx.Entities[EntityHash]) >= 1 &&
 		!ctx.Has(EntityURL) && !ctx.Has(EntityDomain) &&
 		!ctx.Has(EntityIP) && !ctx.Has(EntityIPv6) {
 		return IntentReputation
 	}
-	// Crash / core dump / debugger output → post-mortem triage.
-	if ctx.Has(EntityMemAddr) || reCrash.MatchString(ctx.Raw) {
+	// Post-mortem triage requires genuine crash/debugger evidence - a real
+	// signal (SIGSEGV, core dump, register/backtrace), not a stray hex token.
+	if reCrash.MatchString(ctx.Raw) ||
+		(ctx.Has(EntityMemAddr) && reDebugCtx.MatchString(ctx.Raw)) {
 		return IntentPostMortem
 	}
-	// Active, ongoing failures in a log stream → immediate containment.
-	if ctx.Format == FormatLog && reActiveFailure.MatchString(ctx.Raw) {
+	// Immediate containment requires an actual log stream with timestamped
+	// authentication failures, not merely a line that contains "failed".
+	if ctx.Format == FormatLog && reActiveFailure.MatchString(ctx.Raw) && reSyslog.MatchString(ctx.Raw) {
 		return IntentContainment
 	}
 	return IntentNone

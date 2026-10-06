@@ -34,7 +34,19 @@ const (
 	// FormatAdvsecOutput marks advsec's own rendered output / help text piped
 	// back into advsec, so we don't extract example placeholders as targets.
 	FormatAdvsecOutput Format = "text/advsec_output"
+
+	// List-style streams: wordlists, payload cheat-sheets, and path lists.
+	// These are data to feed to fuzzers, not targets to scan.
+	FormatWordlist    Format = "text/wordlist"
+	FormatPayloadList Format = "text/payload_list"
+	FormatPathList    Format = "text/path_list"
 )
+
+// IsListFormat reports whether a format is a wordlist/payload/path list, where
+// individual lines are data (not targets to extract).
+func IsListFormat(f Format) bool {
+	return f == FormatWordlist || f == FormatPayloadList || f == FormatPathList
+}
 
 // classifyWindow is how many leading bytes the profiler inspects.
 const classifyWindow = 512
@@ -108,6 +120,12 @@ func Classify(raw string) Format {
 	if reAccessLog.MatchString(head) {
 		return FormatLog
 	}
+	// Wordlists / payload lists / path lists must be detected BEFORE code
+	// heuristics, since a list of `<script>` payloads would otherwise look like
+	// JavaScript, and a list of SQLi/traversal strings like code.
+	if lf := detectListFormat(raw); lf != "" {
+		return lf
+	}
 	if reShellBang.MatchString(head) {
 		return FormatShell
 	}
@@ -143,6 +161,10 @@ func formatScope(f Format) (allowed map[string]bool, ok bool) {
 	switch f {
 	case FormatAdvsecOutput:
 		return set(), true // scope to nothing: advsec output has no real targets
+	case FormatWordlist, FormatPayloadList, FormatPathList:
+		// Lists are fuzzing/grep input: only the general-domain wordlist triage
+		// applies; active recon / exploitation / binary rules are suppressed.
+		return set("general"), true
 	case FormatEmail:
 		return set("eml", "crypto"), true
 	case FormatJavaScript:
@@ -173,6 +195,75 @@ func formatScope(f Format) (allowed map[string]bool, ok bool) {
 		// text/plain, json, unknown: no container, evaluate normally.
 		return nil, false
 	}
+}
+
+var (
+	rePathish    = regexp.MustCompile(`(?i)^/(etc|var|proc|sys|home|usr|opt|tmp|root|boot|dev|run)/|^/[a-z0-9._-]+/|\.(x?log|conf|cfg|pid|sock)$|/var/log`)
+	rePayXSS     = regexp.MustCompile(`(?i)<script|onerror=|onload=|<img|<svg|javascript:|alert\(|document\.cookie`)
+	rePaySQLi    = regexp.MustCompile(`(?i)union\s+select|'\s*or\s|"\s*or\s|or\s+1=1|sleep\(|benchmark\(|information_schema|'--|waitfor\s+delay`)
+	rePayTrav    = regexp.MustCompile(`(?i)\.\./|\.\.\\|%2e%2e|/etc/passwd|\.\.%2f|php://|file://|/proc/self/environ`)
+	rePayCmdi    = regexp.MustCompile(`(?i);\s*id\b|\|\s*id\b|\$\(|` + "`" + `|;\s*ls\b|\|\s*whoami|&&\s*cat\s`)
+	rePaySSTI    = regexp.MustCompile(`\{\{.*\}\}|\$\{.*\}|<%=|#\{`)
+	reWordishTok = regexp.MustCompile(`^[A-Za-z0-9._/\-]{1,48}$`)
+)
+
+// detectListFormat inspects the stream line-by-line and classifies wordlists,
+// payload cheat-sheets, and path lists. A stream whose lines carry two or more
+// distinct payload categories (XSS + SQLi + traversal ...) is treated as a
+// payload collection rather than any single code format.
+func detectListFormat(raw string) Format {
+	lines := strings.Split(raw, "\n")
+	var total, payloadLines, pathLines, wordLines int
+	cats := map[string]bool{}
+	for _, ln := range lines {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		total++
+		if total > 200 {
+			break
+		}
+		cat := ""
+		switch {
+		case rePayXSS.MatchString(ln):
+			cat = "xss"
+		case rePaySQLi.MatchString(ln):
+			cat = "sqli"
+		case rePayTrav.MatchString(ln):
+			cat = "trav"
+		case rePayCmdi.MatchString(ln):
+			cat = "cmdi"
+		case rePaySSTI.MatchString(ln):
+			cat = "ssti"
+		}
+		if cat != "" {
+			payloadLines++
+			cats[cat] = true
+			continue
+		}
+		if rePathish.MatchString(ln) {
+			pathLines++
+			continue
+		}
+		if reWordishTok.MatchString(ln) {
+			wordLines++
+		}
+	}
+	if total < 3 {
+		return ""
+	}
+	// Multi-category payloads, or a payload-heavy stream -> payload collection.
+	if len(cats) >= 2 || payloadLines*100 >= total*30 {
+		return FormatPayloadList
+	}
+	if pathLines*100 >= total*60 {
+		return FormatPathList
+	}
+	if wordLines*100 >= total*70 {
+		return FormatWordlist
+	}
+	return ""
 }
 
 // ScopeDomainsForFormat returns the ordered list of allowed domains for a

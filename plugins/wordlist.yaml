@@ -1,0 +1,48 @@
+# Wordlist / payload-list / path-list triage. Scoped automatically when the
+# input stream is classified as a list of fuzzing data rather than a target.
+---
+id: gen-wordlist-triage
+name: "Wordlist & Payload List Triage"
+target_type: data
+domain: general
+author: official
+os_packages:
+  arch: [ffuf, gobuster, feroxbuster, ripgrep]
+  debian: [ffuf, gobuster, feroxbuster, ripgrep]
+  kali: [ffuf, gobuster, feroxbuster, ripgrep]
+match:
+  logic: any
+  rules:
+    - format: "text/wordlist"
+    - format: "text/payload_list"
+    - format: "text/path_list"
+tactics:
+  phase: "Wordlist & Fuzzing Triage"
+  priority: 50
+  next_step: "This looks like a wordlist/payload/path list - feed it to a web fuzzer, directory scanner, or log grepper rather than treating its lines as targets."
+  tools:
+    - name: "ffuf"
+      binary: "ffuf"
+      step: 1
+      phase_label: "Phase 1: Web & Parameter Fuzzing"
+      command: "ffuf -u 'http://<target-ip>/FUZZ' -w {target}"
+      purpose: "Fuzz directories, files, or parameters using this list."
+    - name: "feroxbuster"
+      binary: "feroxbuster"
+      step: 1
+      phase_label: "Phase 1: Web & Parameter Fuzzing"
+      command: "feroxbuster -u 'http://<target-ip>/' -w {target}"
+      purpose: "Recursive content discovery with this wordlist."
+    - name: "nuclei"
+      binary: "nuclei"
+      step: 2
+      phase_label: "Phase 2: Template / Payload Scanning"
+      command: "nuclei -u 'http://<target-ip>' -t {target}"
+      purpose: "Run template-based scans using custom payloads or paths."
+      install: "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+    - name: "grep / ripgrep"
+      binary: "rg"
+      step: 1
+      phase_label: "Phase 1: Local System Searching"
+      command: "rg -f {target} /var/log/"
+      purpose: "Search local logs/files for any of the listed patterns or paths."

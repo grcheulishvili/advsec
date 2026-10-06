@@ -125,6 +125,8 @@ func ruleWeight(r plugin.Rule) int {
 			return 2
 		}
 		return 1
+	case r.Format != "":
+		return 2
 	}
 	return 0
 }
@@ -138,6 +140,8 @@ func ruleMatches(r plugin.Rule, ctx *Context) bool {
 		return strings.Contains(strings.ToLower(ctx.Raw), strings.ToLower(r.Contains))
 	case r.EntityType != "":
 		return ctx.Has(EntityKind(strings.ToLower(r.EntityType)))
+	case r.Format != "":
+		return string(ctx.Format) == r.Format
 	}
 	return false
 }

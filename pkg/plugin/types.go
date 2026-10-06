@@ -50,6 +50,9 @@ type Rule struct {
 	// EntityType matches when the parser extracted at least one entity of the
 	// given type (ip, domain, port, hash, mem_addr).
 	EntityType string `yaml:"entity_type"`
+	// Format matches when the classified input stream equals this format
+	// (e.g. "text/wordlist", "code/javascript").
+	Format string `yaml:"format"`
 }
 
 // Tactics describes what to do once a plugin matches.

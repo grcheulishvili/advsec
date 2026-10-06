@@ -72,7 +72,15 @@ func (e *Evaluator) Evaluate(ctx *Context, matches []Match) *Report {
 		return matches[i].Plugin.ID < matches[j].Plugin.ID
 	})
 
+	// Sanity guard: on list-style streams (wordlists/payloads/paths) the only
+	// relevant output is general-domain triage; drop anything else that slipped
+	// through, so a payload collection never yields exploit recommendations.
+	listStream := IsListFormat(ctx.Format)
+
 	for _, m := range matches {
+		if listStream && m.Plugin.Domain != "general" {
+			continue
+		}
 		rec := Recommendation{
 			PluginID:   m.Plugin.ID,
 			Name:       m.Plugin.Name,

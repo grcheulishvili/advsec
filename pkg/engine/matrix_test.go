@@ -259,6 +259,86 @@ func TestMatrixDiagnostics(t *testing.T) {
 	t.Log("===============================================================")
 }
 
+// --- v1.1.0 real-world list / TLD scenarios ---
+
+//  1. A list of Linux log-file paths must classify as text/path_list, must not
+//     extract anaconda.xlog as a domain, and must yield no DNS/recon tools.
+func TestRealWorld_LinuxLogFilesPathList(t *testing.T) {
+	plugins := plugin.LoadFromDirs([]string{"../../plugins"}).Plugins
+	in := "anaconda.xlog\n/var/log/auth.log\n/var/log/syslog\n/var/log/messages\n/var/log/kern.log\n"
+	ctx, report := matrixReport(t, plugins, in)
+	if ctx.Format != FormatPathList {
+		t.Fatalf("format = %q, want text/path_list", ctx.Format)
+	}
+	for _, d := range ctx.Entities[EntityDomain] {
+		if d == "anaconda.xlog" {
+			t.Fatal("anaconda.xlog was extracted as a domain")
+		}
+	}
+	if ctx.Has(EntityDomain) {
+		t.Errorf("path list should yield no target domains, got %v", ctx.Entities[EntityDomain])
+	}
+	for _, rec := range report.Recommendations {
+		for _, tool := range rec.Tools {
+			for _, bad := range []string{"subfinder", "amass", "httpx", "dnsrecon", "dnsx"} {
+				if strings.Contains(tool.Command, bad) {
+					t.Errorf("path list produced a DNS/recon tool %q", bad)
+				}
+			}
+		}
+	}
+}
+
+//  2. A payload cheat-sheet (XSS + SQLi + traversal + an MD5) must classify as a
+//     payload/word list, NOT code/javascript, and must not scan a dummy target.
+func TestRealWorld_OffensivePayloadList(t *testing.T) {
+	plugins := plugin.LoadFromDirs([]string{"../../plugins"}).Plugins
+	in := strings.Join([]string{
+		`<script>alert(document.cookie)</script>`,
+		`<img src=x onerror=alert(1)>`,
+		`' OR '1'='1' --`,
+		`admin' UNION SELECT username,password FROM users--`,
+		`../../../../etc/passwd`,
+		`%2e%2e%2f%2e%2e%2fetc%2fpasswd`,
+		`d41d8cd98f00b204e9800998ecf8427e`,
+		`192.168.1.6`,
+	}, "\n")
+	ctx, report := matrixReport(t, plugins, in)
+	if ctx.Format != FormatPayloadList && ctx.Format != FormatWordlist {
+		t.Fatalf("format = %q, want payload/word list (not code/javascript)", ctx.Format)
+	}
+	if ctx.Has(EntityIP) || ctx.Has(EntityHash) {
+		t.Errorf("payload lines should not be mined for IP/hash: ip=%v hash=%v",
+			ctx.Entities[EntityIP], ctx.Entities[EntityHash])
+	}
+	for _, rec := range report.Recommendations {
+		if rec.Domain != "general" {
+			t.Errorf("payload list routed to non-general domain %q (%s)", rec.Domain, rec.PluginID)
+		}
+	}
+	if InferIntent(ctx) != IntentNone {
+		t.Errorf("payload list must not infer an intent, got %q", InferIntent(ctx))
+	}
+}
+
+// 3. Domain suffix guard.
+func TestRealWorld_DomainSuffixGuard(t *testing.T) {
+	reject := []string{"file.txt", "script.php", "data.xlog", "archive.7z",
+		"One-Liner-Reverse-Shell.php", "anaconda.xlog", "notes.md", "a.out"}
+	for _, s := range reject {
+		if IsValidDomain(s) {
+			t.Errorf("IsValidDomain(%q) = true, want false", s)
+		}
+	}
+	accept := []string{"target.com", "sub.domain.local", "api.mod.gov.ge",
+		"example.org", "host.internal", "a.io"}
+	for _, s := range accept {
+		if !IsValidDomain(s) {
+			t.Errorf("IsValidDomain(%q) = false, want true", s)
+		}
+	}
+}
+
 func keys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

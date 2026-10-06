@@ -51,6 +51,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no input: pipe data in (e.g. `file bin | advsec`) or use --input FILE")
 	}
 
+	// With --all, mine entities even from list-style streams.
+	engine.ExtractFromLists = flagAll
+
 	ctx := engine.ParseString(input)
 
 	// Guard against advsec's own output / help text being piped back in.

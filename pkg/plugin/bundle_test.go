@@ -64,8 +64,10 @@ func TestBundledPluginsValid(t *testing.T) {
 				if !validEntityTypes[r.EntityType] {
 					t.Errorf("%s rule[%d]: unknown entity_type %q", p.ID, i, r.EntityType)
 				}
+			case r.Format != "":
+				// stream-format match (e.g. text/wordlist); valid as-is
 			default:
-				t.Errorf("%s rule[%d]: empty rule (no regex/contains/entity_type)", p.ID, i)
+				t.Errorf("%s rule[%d]: empty rule (no regex/contains/entity_type/format)", p.ID, i)
 			}
 		}
 

@@ -164,7 +164,7 @@ sudo make install          # -> /usr/local/bin + /usr/share/advsec/plugins
 
 ## Keeping rules fresh
 
-advsec ships 130+ rules across 17 domains and works fully offline. To pull the latest community rules:
+advsec ships 137 rules across 17 domains and works fully offline. To pull the latest community rules:
 
 ```sh
 advsec plugin update       # anonymous public HTTPS - never prompts for credentials
@@ -196,7 +196,7 @@ Everything below is reference material - you don't need it to use advsec.
 
 ### Pipeline
 
-1. **Classify.** The first bytes of the stream are profiled by magic number and structure into a format: `binary/elf|pe|macho`, `archive/zip|gzip|7z`, `email/mime`, `code/javascript|powershell|shell`, `network/nmap|socket`, `text/log`, `document/pdf`, `text/json`, or `text/plain`.
+1. **Classify.** The first bytes and line structure of the stream are profiled into a format: `binary/elf|pe|macho`, `archive/zip|gzip|7z`, `email/mime`, `code/javascript|powershell|shell`, `network/nmap|socket`, `text/log`, `text/wordlist|payload_list|path_list` (lists of fuzzing data, not targets), `document/pdf`, `text/json`, or `text/plain`. Dotted tokens are validated against a strict TLD list, so `anaconda.xlog` or `script.php` are never mistaken for domains.
 2. **Scope.** The format (or an explicit `-c`) narrows evaluation to the relevant domains, so a `.eml` never triggers Kerberoasting and a JS payload never triggers SDR rules.
 3. **Parse.** A bounded 2 MB reader extracts targets - IPs, domains, URLs, ports, hashes, CVEs - with vendor/doc hosts (nmap.org, github.com, ...) filtered out, loopback/bind addresses suppressed, scan targets and cert SANs promoted, and GPG fingerprints kept distinct from SHA-1 hashes.
 4. **Match + score.** Plugin rules (regex / substring / entity-type) match with a confidence weight; weak incidental matches are dropped.
@@ -247,7 +247,7 @@ advsec/
 |  |- engine/      parser, classifier, matcher, evaluator, sequence, assets
 |  |- osdetect/    distro detection + package manager mapping
 |  |- plugin/      YAML types, loader, lifecycle manager
-|- plugins/        130+ rules across 17 domain files
+|- plugins/        137 rules across 17 domain files
 |- Makefile, PKGBUILD, install.sh
 ```
 
