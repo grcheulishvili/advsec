@@ -15,14 +15,32 @@ cat phish.eml        | advsec
 ## Key capabilities
 
 - **UNIX pipe stream parsing** - bounded 2 MB streaming reader; extracts IPs, IPv6, domains, URLs, ports, hashes, CVEs and (in debugger output) memory addresses, with loopback/bind and reverse-DNS noise suppressed.
-- **Magic-byte format profiling** - classifies the input (`email/mime`, `binary/elf|pe|macho`, `archive/zip|gzip|7z`, `text/pcap`, `text/log`, `document/pdf`, `text/json`) and auto-scopes rules so a raw `.eml` never triggers Kerberoasting or SDR rules.
+- **Magic-byte & structural format profiling** - classifies the input (binary, archive, email, source code, scanner output, logs) and auto-scopes rules so a raw `.eml` never triggers Kerberoasting and a JS payload never triggers SDR rules. See the table below.
 - **Action-chain phase sequencing** - groups suggestions into ordered phases (passive triage first, destructive actions last) and reorders them around an inferred intent (reputation lookup, post-mortem triage, immediate containment).
 - **Native package manager integration** - every suggested tool is checked against `PATH`; missing ones come with the exact install command for the host (`pacman`/`yay` on Arch, `apt` on Debian/Kali, or a `pipx`/`go`/`cargo` hint when not distro-packaged).
 - **Asset verification** - hardcoded paths like `/usr/share/wordlists/rockyou.txt` are `os.Stat`-checked, substituted from known locations when possible, or flagged with an install tip.
-- **Offline YAML plugin system** - 129+ rules across 16 domains, loaded from local files. No network needed at runtime; `advsec plugin update` pulls the latest set anonymously over HTTPS.
+- **Offline YAML plugin system** - 132 rules across 17 domains, loaded from local files. No network needed at runtime; `advsec plugin update` pulls the latest set anonymously over HTTPS.
 - **Single static binary** - Go, zero runtime dependencies, sub-20 ms on typical piped input.
 
 ---
+
+## Supported format domains
+
+The stream profiler reads the leading bytes and scopes evaluation to the relevant domains:
+
+| Format | Detected by | Active scope |
+|--------|-------------|--------------|
+| `code/javascript` | `function(`, `document.`, `eval(`, packed `_0x` arrays | js, web, crypto |
+| `code/powershell` | `$env:`, `Invoke-`, `-EncodedCommand`, `[System.`, `[Ref].Assembly` | redteam, crypto, sysadmin |
+| `code/shell` | `#!/bin/...` shebang | sysadmin, dfir |
+| `network/nmap` | `Nmap scan report for`, `PORT STATE SERVICE` | network, recon, web |
+| `network/socket` | `ss`/`netstat`/`lsof -i` tables | network, sysadmin |
+| `email/mime` | `Received:`, `From:`, `MIME-Version:` | eml, crypto |
+| `binary/elf` | magic `\x7fELF` | reversing, pwn, ctf |
+| `binary/pe` | magic `MZ` | reversing, redteam |
+| `text/log` | syslog / journalctl / access logs | blueteam, dfir, sysadmin |
+
+Other formats (`binary/macho`, `archive/zip|gzip|7z`, `text/pcap`, `document/pdf`, `text/json`, `text/plain`) are profiled too. An explicit `-c` overrides the gate; `--no-classify` disables it; `--format` forces one.
 
 ## Installation
 
@@ -66,7 +84,9 @@ Pipe a tool's output into advsec; the default command analyzes it:
 file suspicious.bin        | advsec              # binary triage -> RE action chain
 nmap -sV 10.10.10.5        | advsec -c net       # scope to network services
 curl -sI https://target    | advsec -c web       # web fingerprint -> recon chain
-cat message.eml            | advsec              # auto-detected as email, eml-only rules
+cat message.eml            | advsec              # auto-detected as email, eml-scoped rules
+cat payload.js             | advsec              # auto-detected as JavaScript, js chain
+cat implant.ps1            | advsec -c redteam   # PowerShell
 journalctl -u ssh          | advsec -c dfir      # incident-response chain
 sha256sum sample.bin       | advsec              # lone hash -> reputation intent
 ```
@@ -76,7 +96,7 @@ sha256sum sample.bin       | advsec              # lone hash -> reputation inten
 Scope evaluation to the job at hand. Only that domain plus always-on `general` rules run:
 
 ```sh
-... | advsec -c dfir       # or web, pwn, net, ad, sysadmin, crypto, cloud, ...
+... | advsec -c dfir       # or web, pwn, net, ad, js, sysadmin, crypto, cloud, ...
 ... | advsec -i            # pick the context from an interactive menu
 export ADVSEC_CONTEXT=ad   # pin a default for the session
 ```
@@ -89,23 +109,27 @@ Aliases resolve to canonical domains (`net`->network, `ad`->redteam, `ir`->dfir,
 
 A non-intrusive widget that, on a hotkey, re-runs your last command, pipes it through `advsec --top 3`, and prints suggestions beneath the prompt. It does not run on every command and never alters your command buffer.
 
-### Zsh
+### Automatic install (recommended)
 
 ```sh
-advsec init zsh >> ~/.zshrc
-source ~/.zshrc
+advsec init --install        # detects your shell via $SHELL, appends to the right rc file
+source ~/.zshrc              # or ~/.bashrc
 ```
 
-Then press **Ctrl+Alt+A** after any command. (Ctrl+Alt+S analyzes the current buffer instead.)
+`--install` is idempotent (it skips if the block is already present) and separates the block with blank lines so it can never fuse onto an existing line.
 
-### Bash
+### Manual
 
 ```sh
+advsec init zsh  >> ~/.zshrc     # or:
 advsec init bash >> ~/.bashrc
-source ~/.bashrc
 ```
 
-Then press **Ctrl+Alt+A**.
+Then press **Ctrl+Alt+A** after any command. (Under zsh, Ctrl+Alt+S analyzes the current buffer instead.)
+
+### Shell runtime guards
+
+Each block is wrapped in a shell check - the zsh block runs only when `$ZSH_VERSION` is set, the bash block only when `$BASH_VERSION` is set. If you source the wrong rc file across a shell boundary (e.g. `source ~/.zshrc` inside bash), the block is a silent no-op instead of a cascade of `bindkey`/`zle`/`setopt` syntax errors.
 
 The generated snippet is self-delimited (`# >>> advsec ... >>>` / `# <<< advsec ... <<<`) and prepends blank lines, so appending it is always safe.
 
@@ -147,7 +171,7 @@ tactics:
 
 **Placeholders** expanded from parsed entities: `{target}`, `{target_ip}`, `{target_domain}`, `{target_port}`, `{target_url}`, `{target_hash}`, `{target_addr}`, `{target_cve}`.
 
-**Domains**: `pwn`, `reversing`, `web`, `network`, `recon`, `redteam`, `blueteam`, `forensics`, `crypto`, `ctf`, `cloud`, `sysadmin`, `dfir`, `mobile`, `wireless`, `eml`, `general`.
+**Domains**: `pwn`, `reversing`, `web`, `network`, `recon`, `redteam`, `blueteam`, `forensics`, `crypto`, `ctf`, `cloud`, `sysadmin`, `dfir`, `mobile`, `wireless`, `eml`, `js`, `general`.
 
 Manage plugins:
 
@@ -191,7 +215,7 @@ advsec/
 |  |- engine/      parser, classifier, matcher, evaluator, sequence, assets
 |  |- osdetect/    distro detection + package manager mapping
 |  |- plugin/      YAML types, loader, lifecycle manager
-|- plugins/        129+ rules across 16 domain files
+|- plugins/        132 rules across 17 domain files
 |- Makefile
 |- PKGBUILD
 |- install.sh

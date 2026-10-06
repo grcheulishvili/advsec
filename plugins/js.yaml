@@ -1,0 +1,102 @@
+# JavaScript analysis plugins - scoped automatically when the input stream is
+# classified as code/javascript.
+---
+id: js-analysis
+name: "JavaScript Obfuscation & Source Analysis"
+target_type: code
+domain: js
+author: official
+os_packages:
+  arch: [nodejs, npm]
+  debian: [nodejs, npm]
+  kali: [nodejs, npm]
+match:
+  logic: any
+  rules:
+    - regex: 'function\s*\(|=>|document\.|window\.|eval\(|_0x[0-9a-fA-F]{2,}|atob\(|require\('
+tactics:
+  phase: "JavaScript Analysis"
+  priority: 55
+  next_step: "Beautify, then deobfuscate the AST, then run under an instrumented sandbox to recover decoded payloads."
+  tools:
+    - name: "js-beautify"
+      binary: "js-beautify"
+      step: 1
+      phase_label: "Phase 1: Code Formatting & Unpacking"
+      command: "js-beautify {target} -o formatted.js"
+      purpose: "Reformat minified or packed JavaScript source code."
+      install: "npm install -g js-beautify"
+    - name: "webcrack / synchrony"
+      binary: "webcrack"
+      step: 2
+      phase_label: "Phase 2: AST Deobfuscation"
+      command: "webcrack {target} -o ./decompiled"
+      purpose: "Deobfuscate string arrays, proxy functions, and control-flow flattening."
+      install: "npm install -g webcrack"
+    - name: "node-inspect"
+      binary: "node"
+      step: 3
+      phase_label: "Phase 3: Dynamic Sandbox Debugging"
+      command: "node --inspect-brk {target}"
+      purpose: "Attach the V8 debugger to inspect runtime variable decoding (sandbox only)."
+---
+id: js-secrets
+name: "JavaScript Secrets & Endpoints"
+target_type: code
+domain: js
+author: official
+os_packages:
+  arch: [ripgrep]
+  debian: [ripgrep]
+  kali: [ripgrep]
+match:
+  logic: any
+  rules:
+    - regex: 'api[_-]?key|apikey|secret|token|Bearer |AKIA[0-9A-Z]{16}|firebaseio\.com|/api/v[0-9]'
+tactics:
+  phase: "JavaScript Analysis (Secrets)"
+  priority: 60
+  next_step: "Mine the source for hardcoded credentials, API keys, and backend endpoints, then map the reachable API surface."
+  tools:
+    - name: "secret grep"
+      binary: "rg"
+      command: "rg -oiN 'api[_-]?key|secret|token|https?://[^\"'\\'' ]+' {target}"
+      purpose: "Surface credentials, tokens, and endpoint URLs."
+    - name: "linkfinder"
+      binary: "linkfinder"
+      command: "linkfinder -i {target} -o cli"
+      purpose: "Extract endpoints and paths from JavaScript."
+      install: "pipx install linkfinder"
+---
+id: js-malicious-loader
+name: "Malicious JavaScript Loader / Dropper"
+target_type: code
+domain: js
+author: official
+os_packages:
+  arch: [nodejs]
+  debian: [nodejs]
+  kali: [nodejs]
+match:
+  logic: any
+  rules:
+    - regex: 'eval\(atob|document\.write\(unescape|fromCharCode|String\.fromCharCode|new Function\(|\.src\s*=\s*.(https?:)|ActiveXObject|WScript\.Shell'
+tactics:
+  phase: "JavaScript Analysis (Malware)"
+  priority: 70
+  next_step: "Treat as a dropper: statically decode the obfuscation layers and detonate only in an isolated VM to capture the second stage."
+  tools:
+    - name: "box-js"
+      binary: "box-js"
+      step: 2
+      phase_label: "Phase 2: AST Deobfuscation"
+      command: "box-js {target} --output-dir ./boxjs-out"
+      purpose: "Sandbox malicious JS/WScript and log dropped URLs and files."
+      install: "npm install -g box-js"
+    - name: "malware-jail"
+      binary: "malware-jail"
+      step: 3
+      phase_label: "Phase 3: Dynamic Sandbox Debugging"
+      command: "node malware-jail.js {target}"
+      purpose: "Emulate a browser/WScript environment to trace behavior."
+      install: "git clone https://github.com/HynekPetrak/malware-jail"

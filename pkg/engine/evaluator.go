@@ -175,7 +175,26 @@ func expandPlaceholders(cmd string, ctx *Context) string {
 			out = strings.ReplaceAll(out, k, v)
 		}
 	}
+	// Fallback binding: any placeholder still unbound (e.g. a command wants
+	// {target_domain} but only an IP was extracted) is rewritten to a readable
+	// angle-bracket placeholder so the operator never sees raw template syntax.
+	for tmpl, ph := range placeholderFallbacks {
+		out = strings.ReplaceAll(out, tmpl, ph)
+	}
 	return out
+}
+
+// placeholderFallbacks maps each template token to the human placeholder shown
+// when no value was available to bind.
+var placeholderFallbacks = map[string]string{
+	"{target_ip}":     "<target-ip>",
+	"{target_domain}": "<target-domain>",
+	"{target_port}":   "<target-port>",
+	"{target_url}":    "<target-url>",
+	"{target_hash}":   "<target-hash>",
+	"{target_addr}":   "<target-addr>",
+	"{target_cve}":    "<target-cve>",
+	"{target}":        "<target>",
 }
 
 func firstWord(s string) string {

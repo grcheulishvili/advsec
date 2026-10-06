@@ -24,6 +24,12 @@ const (
 	Format7z      Format = "archive/7z"
 	FormatPDF     Format = "document/pdf"
 	FormatJSON    Format = "text/json"
+
+	FormatJavaScript Format = "code/javascript"
+	FormatPowerShell Format = "code/powershell"
+	FormatShell      Format = "code/shell"
+	FormatNmap       Format = "network/nmap"
+	FormatSocket     Format = "network/socket"
 )
 
 // classifyWindow is how many leading bytes the profiler inspects.
@@ -34,6 +40,12 @@ var (
 	reSyslog    = regexp.MustCompile(`(?m)^([A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|\[\s*\d+\.\d+\])`)
 	reAccessLog = regexp.MustCompile(`"(GET|POST|PUT|HEAD|DELETE) [^"]+ HTTP/[0-9.]+"\s+\d{3}`)
 	reJSON      = regexp.MustCompile(`^\s*[\{\[]`)
+
+	reNmap       = regexp.MustCompile(`(?m)Nmap scan report for|Starting Nmap|^PORT\s+STATE\s+SERVICE`)
+	reSocket     = regexp.MustCompile(`(?m)^Netid\s+State|Recv-Q\s+Send-Q|Active Internet connections|^Proto\s+Recv-Q`)
+	rePowerShell = regexp.MustCompile(`(?m)\$env:|Invoke-[A-Z]|-[Ee]ncodedCommand|\[System\.[A-Za-z]|\[Ref\]\.Assembly|\bIEX\b|New-Object\s+Net\.WebClient`)
+	reJavaScript = regexp.MustCompile(`(?m)function\s*\(|=>|document\.(cookie|write|location)|window\[|window\.|eval\(|_0x[0-9a-fA-F]{2,}|console\.log|require\(|module\.exports|atob\(`)
+	reShellBang  = regexp.MustCompile(`(?m)^#!\s*/(bin|usr/bin)/`)
 )
 
 // Classify profiles the first bytes of raw input and returns its format.
@@ -71,11 +83,30 @@ func Classify(raw string) Format {
 		return FormatPcap
 	}
 
-	// --- structured text heuristics ---
+	// --- structured text heuristics (most specific first) ---
 	if reEmailHdr.MatchString(head) {
 		return FormatEmail
 	}
-	if reAccessLog.MatchString(head) || reSyslog.MatchString(head) {
+	if reNmap.MatchString(head) {
+		return FormatNmap
+	}
+	if reSocket.MatchString(head) {
+		return FormatSocket
+	}
+	// Access logs look superficially code-ish; classify them before code.
+	if reAccessLog.MatchString(head) {
+		return FormatLog
+	}
+	if reShellBang.MatchString(head) {
+		return FormatShell
+	}
+	if rePowerShell.MatchString(head) {
+		return FormatPowerShell
+	}
+	if reJavaScript.MatchString(head) {
+		return FormatJavaScript
+	}
+	if reSyslog.MatchString(head) {
 		return FormatLog
 	}
 	if reJSON.MatchString(head) {
@@ -100,7 +131,17 @@ func formatScope(f Format) (allowed map[string]bool, ok bool) {
 	}
 	switch f {
 	case FormatEmail:
-		return set("eml"), true
+		return set("eml", "crypto"), true
+	case FormatJavaScript:
+		return set("js", "web", "crypto"), true
+	case FormatPowerShell:
+		return set("redteam", "crypto", "sysadmin"), true
+	case FormatShell:
+		return set("sysadmin", "dfir"), true
+	case FormatNmap:
+		return set("network", "recon", "web"), true
+	case FormatSocket:
+		return set("network", "sysadmin"), true
 	case FormatPcap:
 		return set("forensics", "network"), true
 	case FormatZip, FormatGzip, Format7z:
@@ -109,10 +150,14 @@ func formatScope(f Format) (allowed map[string]bool, ok bool) {
 		return set("general", "forensics", "ctf"), true
 	case FormatELF:
 		return set("pwn", "reversing", "ctf"), true
-	case FormatPE, FormatMachO:
+	case FormatPE:
+		return set("reversing", "redteam"), true
+	case FormatMachO:
 		return set("reversing", "pwn"), true
+	case FormatLog:
+		return set("blueteam", "dfir", "sysadmin", "general"), true
 	default:
-		// text/log, text/plain, json, unknown: no container, evaluate normally.
+		// text/plain, json, unknown: no container, evaluate normally.
 		return nil, false
 	}
 }

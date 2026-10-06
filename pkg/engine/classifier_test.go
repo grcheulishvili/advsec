@@ -77,9 +77,12 @@ func TestEmailDoesNotTriggerUnrelatedRules(t *testing.T) {
 	}
 	scoped := FilterByFormat(res.Plugins, ctx.Format)
 	matches := NewMatcher(scoped).Evaluate(ctx)
+	// Email scopes to {eml, crypto}; the offensive/infra domains must never fire.
+	suppressed := map[string]bool{"network": true, "redteam": true, "cloud": true,
+		"wireless": true, "pwn": true, "reversing": true, "mobile": true}
 	for _, m := range matches {
-		if m.Plugin.Domain != "eml" {
-			t.Errorf("email input surfaced non-eml rule %q (domain %q)", m.Plugin.ID, m.Plugin.Domain)
+		if suppressed[m.Plugin.Domain] {
+			t.Errorf("email input surfaced suppressed rule %q (domain %q)", m.Plugin.ID, m.Plugin.Domain)
 		}
 	}
 }

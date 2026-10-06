@@ -10,7 +10,7 @@ import (
 var canonicalDomains = []string{
 	"pwn", "reversing", "web", "network", "recon", "redteam", "blueteam",
 	"forensics", "crypto", "ctf", "cloud", "sysadmin", "dfir", "mobile",
-	"wireless", "general",
+	"wireless", "eml", "js", "general",
 }
 
 // domainAliases maps user-friendly / short names onto a canonical domain so
@@ -34,6 +34,8 @@ var domainAliases = map[string]string{
 	"android": "mobile", "ios": "mobile", "apk": "mobile",
 	"wifi": "wireless", "rf": "wireless", "bluetooth": "wireless", "ble": "wireless", "sdr": "wireless",
 	"misc": "general", "util": "general", "general-usability": "general",
+	"javascript": "js", "node": "js", "nodejs": "js",
+	"email": "eml", "mail": "eml", "mime": "eml",
 }
 
 // CanonicalDomain normalizes free-form user input to a canonical domain name.

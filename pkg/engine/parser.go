@@ -180,9 +180,16 @@ func ParseString(raw string) *Context {
 	}
 
 	external := false
+	// In source code, dotted identifiers (document.cookie, os.path) look like
+	// domains; suppress bare-domain extraction for code formats. URLs (which
+	// carry a scheme) are still extracted.
+	codeFormat := ctx.Format == FormatJavaScript || ctx.Format == FormatPowerShell || ctx.Format == FormatShell
 
 	// URLs first so their host parts don't pollute bare-domain extraction.
 	for _, u := range reURL.FindAllString(raw, -1) {
+		if host := urlHost(u); host != "" && isIgnoredDomain(host) {
+			continue // drop vendor/documentation URLs (nmap.org, github.com, ...)
+		}
 		add(EntityURL, u)
 		if !urlIsLocal(u) {
 			external = true
@@ -216,11 +223,13 @@ func ParseString(raw string) *Context {
 		external = true
 	}
 
-	for _, m := range reDomain.FindAllString(raw, -1) {
-		if isPlausibleDomain(m) {
-			d := strings.ToLower(m)
-			add(EntityDomain, d)
-			external = true
+	if !codeFormat {
+		for _, m := range reDomain.FindAllString(raw, -1) {
+			if isPlausibleDomain(m) && !isIgnoredDomain(m) {
+				d := strings.ToLower(m)
+				add(EntityDomain, d)
+				external = true
+			}
 		}
 	}
 	for _, m := range rePortNmap.FindAllStringSubmatch(raw, -1) {
@@ -250,7 +259,75 @@ func ParseString(raw string) *Context {
 	if ports := ctx.Entities[EntityPort]; len(ports) > 1 {
 		sort.Slice(ports, func(i, j int) bool { return atoiSafe(ports[i]) < atoiSafe(ports[j]) })
 	}
+
+	// Extraction precedence: promote explicit scan targets and certificate SANs
+	// to the front so {target}/{target_domain} resolve to the real target.
+	prioritizeTargets(ctx, raw)
 	return ctx
+}
+
+var (
+	// reScanTarget matches "Nmap scan report for <host> (<ip>)" and the bare
+	// "<host>" form.
+	reScanTarget = regexp.MustCompile(`(?im)^\s*Nmap scan report for\s+(\S+?)(?:\s+\(([0-9.]+)\))?\s*$`)
+	// reSAN matches certificate Subject Alternative Name DNS entries.
+	reSAN = regexp.MustCompile(`DNS:([*A-Za-z0-9._-]+)`)
+)
+
+// prioritizeTargets reorders the domain/IP entity lists so that hosts named as
+// scan targets or certificate SANs come first (Priority 1), ahead of other
+// extracted domains/IPs (Priority 2). Hashes/paths remain Priority 3.
+func prioritizeTargets(ctx *Context, raw string) {
+	var pd, pi []string
+	for _, m := range reScanTarget.FindAllStringSubmatch(raw, -1) {
+		host, ip := strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+		if ip != "" && net.ParseIP(ip) != nil && !loopbackOrBind(ip) {
+			pi = append(pi, ip)
+		}
+		if host != "" {
+			if net.ParseIP(host) != nil {
+				if !loopbackOrBind(host) {
+					pi = append(pi, host)
+				}
+			} else if isPlausibleDomain(host) && !isIgnoredDomain(host) {
+				pd = append(pd, strings.ToLower(host))
+			}
+		}
+	}
+	for _, m := range reSAN.FindAllStringSubmatch(raw, -1) {
+		h := strings.TrimPrefix(strings.ToLower(m[1]), "*.")
+		if isPlausibleDomain(h) && !isIgnoredDomain(h) {
+			pd = append(pd, h)
+		}
+	}
+	if len(pd) > 0 {
+		ctx.Entities[EntityDomain] = moveFront(ctx.Entities[EntityDomain], pd)
+		ctx.ExternalTarget = true
+	}
+	if len(pi) > 0 {
+		ctx.Entities[EntityIP] = moveFront(ctx.Entities[EntityIP], pi)
+		ctx.ExternalTarget = true
+	}
+}
+
+// moveFront returns front items (deduped) followed by the remaining list items.
+func moveFront(list, front []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(list)+len(front))
+	for _, v := range front {
+		v = strings.TrimSpace(v)
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	for _, v := range list {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func appendUnique(s []string, v string) []string {
@@ -264,6 +341,23 @@ func appendUnique(s []string, v string) []string {
 		}
 	}
 	return append(s, v)
+}
+
+// urlHost extracts the host portion of a URL (no scheme, port, path, or creds).
+func urlHost(u string) string {
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	}
+	if i := strings.IndexAny(u, "/?#"); i >= 0 {
+		u = u[:i]
+	}
+	if i := strings.LastIndex(u, "@"); i >= 0 {
+		u = u[i+1:]
+	}
+	if i := strings.Index(u, ":"); i >= 0 {
+		u = u[:i]
+	}
+	return strings.ToLower(u)
 }
 
 // urlIsLocal reports whether a URL points at localhost/loopback.
