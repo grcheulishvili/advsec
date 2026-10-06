@@ -1,6 +1,6 @@
 # Maintainer: grcheulishvili <rcheulishvili69@gmail.com>
 pkgname=advsec
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Context-aware UNIX pipe recommendation engine for offensive/defensive security tooling"
 arch=('x86_64' 'aarch64')

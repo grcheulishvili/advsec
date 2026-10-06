@@ -12,10 +12,13 @@ import (
 type ToolRec struct {
 	Name           string
 	Purpose        string
-	Command        string // placeholder-expanded
+	Command        string // placeholder-expanded, asset-verified
 	Binary         string
 	Installed      bool
 	InstallCommand string // empty when already installed or no package mapping
+	// AssetNotes carries warnings/substitutions for hardcoded asset paths
+	// (e.g. a missing /usr/share/wordlists/rockyou.txt).
+	AssetNotes []AssetNote
 }
 
 // Recommendation is a matched plugin rendered into actionable output for a
@@ -86,12 +89,14 @@ func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) To
 	}
 	installed := osdetect.IsInstalled(binary)
 
+	cmd, notes := VerifyCommandAssets(expandPlaceholders(t.Command, ctx), e.host.Manager)
 	tr := ToolRec{
-		Name:      t.Name,
-		Purpose:   t.Purpose,
-		Command:   expandPlaceholders(t.Command, ctx),
-		Binary:    binary,
-		Installed: installed,
+		Name:       t.Name,
+		Purpose:    t.Purpose,
+		Command:    cmd,
+		Binary:     binary,
+		Installed:  installed,
+		AssetNotes: notes,
 	}
 	if !installed {
 		tr.InstallCommand = e.installCommandFor(p, t, binary)

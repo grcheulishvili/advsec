@@ -78,7 +78,22 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		activeCtx = ""
 	}
 
-	plugins := plugin.FilterByContext(load.Plugins, activeCtx)
+	// Determine the effective format (auto-detected or forced via --format).
+	format := ctx.Format
+	if flagFormat != "" {
+		format = engine.Format(flagFormat)
+	}
+
+	// Rule scoping precedence: an explicit context wins; otherwise the
+	// classified stream format gates which domains are relevant (so raw .eml
+	// doesn't trigger Kerberoasting/Docker/SDR/etc).
+	plugins := load.Plugins
+	switch {
+	case activeCtx != "":
+		plugins = plugin.FilterByContext(plugins, activeCtx)
+	case !flagNoClassify && engine.FormatRestricts(format):
+		plugins = engine.FilterByFormat(plugins, format)
+	}
 
 	matcher := engine.NewMatcher(plugins)
 	matches := matcher.Evaluate(ctx)
@@ -108,9 +123,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	if flagJSON {
-		return emitJSON(report, activeCtx)
+		return emitJSON(report, activeCtx, format)
 	}
-	renderText(os.Stdout, report, activeCtx)
+	renderText(os.Stdout, report, activeCtx, format)
 	return nil
 }
 
@@ -152,13 +167,20 @@ func filterMissing(r *engine.Report) {
 
 // ---- JSON output ----
 
+type jsonAssetNote struct {
+	Path        string `json:"path"`
+	Substituted string `json:"substituted,omitempty"`
+	Tip         string `json:"tip,omitempty"`
+}
+
 type jsonTool struct {
-	Name           string `json:"name"`
-	Purpose        string `json:"purpose"`
-	Command        string `json:"command"`
-	Binary         string `json:"binary"`
-	Installed      bool   `json:"installed"`
-	InstallCommand string `json:"install_command,omitempty"`
+	Name           string          `json:"name"`
+	Purpose        string          `json:"purpose"`
+	Command        string          `json:"command"`
+	Binary         string          `json:"binary"`
+	Installed      bool            `json:"installed"`
+	InstallCommand string          `json:"install_command,omitempty"`
+	AssetNotes     []jsonAssetNote `json:"asset_notes,omitempty"`
 }
 
 type jsonRec struct {
@@ -174,6 +196,7 @@ type jsonRec struct {
 
 type jsonReport struct {
 	Context string `json:"context,omitempty"`
+	Format  string `json:"format,omitempty"`
 	Host    struct {
 		ID         string `json:"id"`
 		PrettyName string `json:"pretty_name"`
@@ -184,9 +207,10 @@ type jsonReport struct {
 	Recommendations []jsonRec           `json:"recommendations"`
 }
 
-func emitJSON(r *engine.Report, activeCtx string) error {
+func emitJSON(r *engine.Report, activeCtx string, format engine.Format) error {
 	var jr jsonReport
 	jr.Context = activeCtx
+	jr.Format = string(format)
 	jr.Host.ID = r.Host.ID
 	jr.Host.PrettyName = r.Host.PrettyName
 	jr.Host.Family = string(r.Host.Family)
@@ -201,10 +225,14 @@ func emitJSON(r *engine.Report, activeCtx string) error {
 			Phase: rec.Phase, NextStep: rec.NextStep, Score: rec.Score, Confidence: rec.Confidence,
 		}
 		for _, t := range rec.Tools {
-			j.Tools = append(j.Tools, jsonTool{
+			jt := jsonTool{
 				Name: t.Name, Purpose: t.Purpose, Command: t.Command,
 				Binary: t.Binary, Installed: t.Installed, InstallCommand: t.InstallCommand,
-			})
+			}
+			for _, n := range t.AssetNotes {
+				jt.AssetNotes = append(jt.AssetNotes, jsonAssetNote{Path: n.Path, Substituted: n.Substituted, Tip: n.Tip})
+			}
+			j.Tools = append(j.Tools, jt)
 		}
 		jr.Recommendations = append(jr.Recommendations, j)
 	}

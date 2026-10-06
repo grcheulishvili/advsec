@@ -19,7 +19,7 @@ var highConfidenceOrder = []engine.EntityKind{
 	engine.EntityIP, engine.EntityIPv6, engine.EntityCVE, engine.EntityEmail,
 }
 
-func renderText(w io.Writer, r *engine.Report, activeCtx string) {
+func renderText(w io.Writer, r *engine.Report, activeCtx string, format engine.Format) {
 	color := !flagNoColor && isTTY(w)
 	s := newStyles(color)
 
@@ -27,11 +27,17 @@ func renderText(w io.Writer, r *engine.Report, activeCtx string) {
 	ctxLabel := "ALL DOMAINS"
 	if activeCtx != "" {
 		ctxLabel = strings.ToUpper(activeCtx)
+	} else if format != "" && format != engine.FormatText && engine.FormatRestricts(format) {
+		// No explicit context but the format scoped us — reflect that.
+		ctxLabel = strings.ToUpper(string(format))
 	}
 	osLabel := orUnknown(r.Host.PrettyName)
 	header := fmt.Sprintf("%s │ %s (%s) │ Context: [%s]",
 		s.brand.Render("ADVSEC"), osLabel, r.Host.Manager.Name, s.ctx.Render(ctxLabel))
 	fmt.Fprintln(w, s.box.Render(header))
+	if format != "" && format != engine.FormatText {
+		fmt.Fprintf(w, "%s %s\n", s.label.Render("Input Format:   "), s.value.Render(string(format)))
+	}
 
 	// ---- target artifact ----
 	if kind, val := primaryArtifact(r.Context); val != "" {
@@ -82,6 +88,16 @@ func renderTool(w io.Writer, s styles, t engine.ToolRec) {
 	}
 	if t.Purpose != "" {
 		fmt.Fprintln(w, "  "+s.label.Render("Purpose:")+" "+s.dim.Render(t.Purpose))
+	}
+	for _, n := range t.AssetNotes {
+		if n.Substituted != "" {
+			fmt.Fprintln(w, "  "+s.okDim.Render("[i] Using detected asset: "+n.Substituted))
+		} else {
+			fmt.Fprintln(w, "  "+s.warn.Render("[!] Missing Asset: "+n.Path))
+			if n.Tip != "" {
+				fmt.Fprintln(w, "      "+s.install.Render("Install: "+n.Tip))
+			}
+		}
 	}
 	if !t.Installed && t.InstallCommand != "" {
 		fmt.Fprintln(w, "  "+s.install.Render("Install: "+t.InstallCommand))

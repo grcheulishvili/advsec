@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,9 +14,30 @@ import (
 	"time"
 )
 
-// OfficialRepo is the canonical community/official plugin repository pulled by
-// `advsec plugin update`.
-const OfficialRepo = "https://github.com/grcheulishvili/advsec-plugins.git"
+// Official plugin source. Plugins live in the main repo's plugins/ directory;
+// `advsec plugin update` fetches them anonymously over public HTTPS (never SSH,
+// never an authenticated remote) and falls back to the release ZIP if git is
+// unavailable or errors.
+const (
+	OfficialRepo          = "https://github.com/grcheulishvili/advsec.git"
+	OfficialBranch        = "main"
+	OfficialZipURL        = "https://github.com/grcheulishvili/advsec/archive/refs/heads/main.zip"
+	OfficialPluginsSubdir = "plugins"
+	// officialDir is where fetched official plugins are stored under the user
+	// plugin tree (kept separate from hand-authored user plugins).
+	officialDir = "official"
+)
+
+// gitEnv returns the process environment with every interactive prompt
+// disabled, so a public clone/pull can never block on a credential prompt.
+func gitEnv() []string {
+	return append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0", // git: fail instead of prompting for user/pass
+		"GIT_ASKPASS=/bin/echo", // neutralize any askpass helper
+		"SSH_ASKPASS=/bin/echo",
+		"GCM_INTERACTIVE=never", // git-credential-manager: never prompt
+	)
+}
 
 // Manager performs plugin lifecycle operations (list/install/update) and
 // package-cache maintenance against the user's config tree.
@@ -108,40 +131,40 @@ func (m *Manager) installGit(gitURL string) (string, error) {
 	}
 
 	cmd := exec.Command("git", "clone", "--depth", "1", gitURL, dest)
+	cmd.Env = gitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git clone failed: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return dest, nil
 }
 
-// Update pulls the official repo (installing it on first run) and refreshes
-// every git-managed plugin directory already present. It returns a per-target
-// summary.
+// Update refreshes the official plugin set (from the main repo's plugins/
+// directory) and any community git repos already installed. It is strictly
+// anonymous/public: it never prompts for credentials, and if git is missing or
+// errors it falls back to the public release ZIP. Returns a per-target summary.
 func (m *Manager) Update() ([]string, error) {
 	if err := m.EnsureDirs(); err != nil {
 		return nil, err
 	}
 	var summary []string
 
-	// Official repo first.
-	if _, err := m.installGit(OfficialRepo); err != nil {
+	// Official plugins: git first, ZIP fallback.
+	n, via, err := m.updateOfficial()
+	if err != nil {
 		summary = append(summary, "official: "+err.Error())
 	} else {
-		summary = append(summary, "official: up to date")
+		summary = append(summary, fmt.Sprintf("official: %d plugin file(s) via %s", n, via))
 	}
 
-	// Any other git repos living directly under the plugins dir.
+	// Any community git repos living directly under the plugins dir.
 	entries, _ := os.ReadDir(m.UserDir)
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() || e.Name() == officialDir {
 			continue
 		}
 		dir := filepath.Join(m.UserDir, e.Name())
 		if !isGitRepo(dir) {
 			continue
-		}
-		if dir == filepath.Join(m.UserDir, repoDirName(OfficialRepo)) {
-			continue // already handled
 		}
 		if err := gitPull(dir); err != nil {
 			summary = append(summary, e.Name()+": "+err.Error())
@@ -150,6 +173,135 @@ func (m *Manager) Update() ([]string, error) {
 		}
 	}
 	return summary, nil
+}
+
+// updateOfficial installs the official plugins into UserDir/official, returning
+// the number of YAML files written and which transport was used ("git" or
+// "zip"). git is tried first (shallow, prompt-free); on any failure it falls
+// back to the public ZIP so a missing git binary or auth error is never fatal.
+func (m *Manager) updateOfficial() (count int, via string, err error) {
+	dest := filepath.Join(m.UserDir, officialDir)
+
+	if _, lookErr := exec.LookPath("git"); lookErr == nil {
+		if n, gerr := m.officialViaGit(dest); gerr == nil {
+			return n, "git", nil
+		}
+		// else fall through to ZIP
+	}
+	n, zerr := m.officialViaZip(dest)
+	if zerr != nil {
+		return 0, "", fmt.Errorf("git and ZIP fetch both failed: %w", zerr)
+	}
+	return n, "zip", nil
+}
+
+// officialViaGit shallow-clones the repo to a temp dir and copies its plugins/
+// directory into dest. Uses gitEnv() so it can never prompt.
+func (m *Manager) officialViaGit(dest string) (int, error) {
+	tmp, err := os.MkdirTemp("", "advsec-official-*")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(tmp)
+
+	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", OfficialBranch,
+		"--single-branch", OfficialRepo, tmp)
+	cmd.Env = gitEnv()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("clone: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	src := filepath.Join(tmp, OfficialPluginsSubdir)
+	return copyYAMLDir(src, dest)
+}
+
+// officialViaZip downloads the public branch ZIP and extracts the plugins/
+// directory into dest. No git, no auth.
+func (m *Manager) officialViaZip(dest string) (int, error) {
+	data, err := httpGet(OfficialZipURL)
+	if err != nil {
+		return 0, fmt.Errorf("download zip: %w", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return 0, fmt.Errorf("open zip: %w", err)
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return 0, err
+	}
+	// Entries look like "advsec-main/plugins/foo.yaml"; keep only YAML under
+	// a top-level plugins/ directory.
+	count := 0
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() || !isYAML(f.Name) {
+			continue
+		}
+		parts := strings.Split(f.Name, "/")
+		inPlugins := false
+		for i := 0; i+1 < len(parts); i++ {
+			if parts[i] == OfficialPluginsSubdir {
+				inPlugins = true
+				break
+			}
+		}
+		if !inPlugins {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return count, err
+		}
+		body, err := io.ReadAll(io.LimitReader(rc, 4*1024*1024))
+		rc.Close()
+		if err != nil {
+			return count, err
+		}
+		// Only persist files that actually parse as plugins.
+		if _, perr := LoadBytes(body); perr != nil {
+			continue
+		}
+		out := filepath.Join(dest, filepath.Base(f.Name))
+		if err := os.WriteFile(out, body, 0o644); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("no plugins found in ZIP under %s/", OfficialPluginsSubdir)
+	}
+	return count, nil
+}
+
+// copyYAMLDir copies every *.yaml/*.yml from src into dest (flat), returning
+// the count written. Only files that parse as plugins are kept.
+func copyYAMLDir(src, dest string) (int, error) {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return 0, fmt.Errorf("official plugins dir missing: %w", err)
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() || !isYAML(e.Name()) {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			return count, err
+		}
+		if _, perr := LoadBytes(body); perr != nil {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dest, e.Name()), body, 0o644); err != nil {
+			return count, err
+		}
+		count++
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("no valid plugin files in %s", src)
+	}
+	return count, nil
 }
 
 // PackageCache is the on-disk snapshot refreshed by `advsec update-cache`.
@@ -259,6 +411,7 @@ func isGitRepo(dir string) bool {
 
 func gitPull(dir string) error {
 	cmd := exec.Command("git", "-C", dir, "pull", "--ff-only")
+	cmd.Env = gitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%v: %s", err, strings.TrimSpace(string(out)))
 	}

@@ -60,11 +60,33 @@ Piping into `advsec` runs the analyzer (the default command):
 | `-i, --select` | Interactively pick the context before evaluation (reads `/dev/tty`) |
 | `--min-confidence N` | Minimum match confidence to render (default `2`) |
 | `-a, --all` | Show every match regardless of confidence |
+| `--no-classify` | Disable magic-byte format gating (evaluate all domains) |
+| `--format <fmt>` | Force the input format (e.g. `email/mime`, `binary/elf`) |
 | `--top N` | Show only the N highest-priority recommendations |
 | `--missing-only` | Only show tools not installed locally (plus their install command) |
 | `--json` | Machine-readable output (includes `domain` and `confidence`) |
 | `--no-color` | Disable ANSI styling |
 | `-f, --input FILE` | Read from a file instead of stdin |
+
+### Format classification
+
+Before matching, advsec profiles the first 512 bytes of the stream (magic bytes
++ structured-text heuristics) and classifies it: `email/mime`, `binary/elf`,
+`binary/pe`, `binary/macho`, `archive/zip|gzip|7z`, `text/pcap`, `text/log`,
+`document/pdf`, `text/json`, `text/plain`. Container formats are **scoped
+automatically** — e.g. a raw `.eml` runs only the `eml` domain, so
+`cat message.eml | advsec` no longer trips Kerberoasting, Docker, SDR or
+Bluetooth rules. An explicit `-c` overrides the gate; `--no-classify` disables
+it; `--format` forces one.
+
+### Asset verification
+
+Commands that reference a hardcoded asset path (`/usr/share/wordlists/…`,
+`/usr/share/yara-rules/…`) are checked with `os.Stat` before rendering. If the
+path is missing, advsec searches the usual locations
+(`/usr/share/seclists`, `/usr/share/wordlists`, `/usr/share/dict`) for a
+substitute; failing that it prints a `<path-to-…>` placeholder with a
+`[!] Missing Asset` warning and an install tip for your distro.
 
 ### Context scoping
 
@@ -84,6 +106,11 @@ everything and, if results span multiple domains, prints a one-line scoping
 *suggestion* to stderr — it never switches context for you.
 
 ### Shell integration
+
+`advsec plugin update` fetches the official rules from the public repo's
+`plugins/` directory **anonymously over HTTPS** (`GIT_TERMINAL_PROMPT=0`, no SSH,
+no credential prompt), falling back to the public branch ZIP when `git` is
+absent or errors.
 
 `advsec init zsh` / `advsec init bash` emit a non-intrusive widget bound to
 **Ctrl+Alt+A**: it re-runs your last command, pipes the output through
@@ -142,7 +169,7 @@ plugins separated by `---`):
 
 `pwn` · `reversing` · `web` · `network` · `recon` · `redteam` · `blueteam` ·
 `forensics` · `crypto` · `ctf` · `cloud` · `sysadmin` · `dfir` · `mobile` ·
-`wireless` · `general` — covering pentest, red team, blue team / DFIR, RE,
+`wireless` · `eml` · `general` — covering pentest, red team, blue team / DFIR, RE,
 CTF, cloud/container, wireless, and day-to-day sysadmin triage.
 
 ### Schema

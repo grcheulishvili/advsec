@@ -1,0 +1,127 @@
+# RFC 822 / MIME email triage — scoped automatically when the input stream is
+# classified as email/mime, so raw .eml never triggers unrelated attack rules.
+---
+id: eml-header-analysis
+name: "Email Header Analysis"
+target_type: email
+domain: eml
+author: official
+os_packages:
+  arch: [perl-mime-tools]
+  debian: [libmime-tools-perl]
+  kali: [libmime-tools-perl]
+match:
+  logic: any
+  rules:
+    - regex: '(?im)^received:\s'
+    - regex: '(?im)^message-id:\s'
+    - regex: '(?im)^return-path:\s'
+tactics:
+  phase: "Email Triage (Headers)"
+  priority: 60
+  next_step: "Walk the Received chain to find the true origin, check Return-Path vs From mismatch, and note the sending IP/HELO."
+  tools:
+    - name: "header view"
+      binary: "formail"
+      command: "formail -X '' < message.eml | head -40"
+      purpose: "Print the full header block for inspection."
+    - name: "eml-parser"
+      binary: "eml_parser"
+      command: "python3 -c 'import eml_parser,sys; print(eml_parser.EmlParser().decode_email(message.eml))'"
+      purpose: "Structured parse of headers, routing, and attachments."
+      install: "pipx install eml-parser"
+    - name: "msgconvert"
+      binary: "msgconvert"
+      command: "msgconvert message.eml"
+      purpose: "Convert Outlook .msg to .eml for analysis."
+---
+id: eml-spf-dkim-dmarc
+name: "SPF / DKIM / DMARC Authentication"
+target_type: email
+domain: eml
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: '(?im)^(authentication-results|dkim-signature|received-spf):'
+    - regex: 'spf=(pass|fail|softfail|neutral)|dkim=(pass|fail)|dmarc=(pass|fail)'
+tactics:
+  phase: "Email Triage (Authentication)"
+  priority: 65
+  next_step: "Verify SPF/DKIM/DMARC results — fail/softfail or an alignment mismatch is a strong spoofing signal."
+  tools:
+    - name: "auth-results grep"
+      binary: "grep"
+      command: "grep -Ei 'spf=|dkim=|dmarc=|Authentication-Results' message.eml"
+      purpose: "Surface the authentication verdicts at a glance."
+    - name: "dig spf"
+      binary: "dig"
+      command: "dig +short TXT {target_domain} | grep -i spf"
+      purpose: "Compare the sending domain's published SPF record."
+---
+id: eml-attachment-carve
+name: "Email Attachment Carving"
+target_type: email
+domain: eml
+author: official
+os_packages:
+  arch: [ripmime]
+  debian: [ripmime]
+  kali: [ripmime]
+match:
+  logic: any
+  rules:
+    - regex: '(?im)^content-disposition:\s*attachment'
+    - regex: 'Content-Transfer-Encoding:\s*base64'
+    - regex: 'name=.*\.(exe|zip|docm?|xlsm?|pdf|js|iso|img|htm|lnk)'
+tactics:
+  phase: "Email Triage (Attachments)"
+  priority: 70
+  next_step: "Carve and hash attachments, then detonate suspicious Office/archive/executable payloads in a sandbox."
+  tools:
+    - name: "ripmime"
+      binary: "ripmime"
+      command: "ripmime -i message.eml -d ./attachments && sha256sum ./attachments/*"
+      purpose: "Extract all MIME parts and hash them."
+    - name: "munpack"
+      binary: "munpack"
+      command: "munpack -t -C ./attachments message.eml"
+      purpose: "Unpack MIME attachments (with text parts)."
+    - name: "olevba"
+      binary: "olevba"
+      command: "olevba ./attachments/*"
+      purpose: "Scan Office attachments for malicious macros."
+      install: "pipx install oletools"
+---
+id: eml-phishing-url
+name: "Phishing URL Extraction"
+target_type: email
+domain: eml
+author: official
+os_packages:
+  arch: [python-pip]
+  debian: [python3-pip]
+  kali: [python3-pip]
+match:
+  logic: any
+  rules:
+    - regex: 'https?://'
+    - regex: 'href=|url=|click here|verify your account|reset your password'
+tactics:
+  phase: "Email Triage (URLs)"
+  priority: 55
+  next_step: "Extract and defang every URL, expand shorteners, and enrich domains/IPs against threat intel before anyone clicks."
+  tools:
+    - name: "extract + defang"
+      binary: "defang"
+      command: "grep -Eoi 'https?://[^\"'\\'' >]+' message.eml | sort -u | defang"
+      purpose: "List and neutralize URLs so they are safe to share."
+      install: "pipx install defang"
+    - name: "url domains"
+      binary: "grep"
+      command: "grep -Eoi 'https?://[^/\"'\\'' ]+' message.eml | sed -E 's#https?://##' | sort -u"
+      purpose: "Pull unique sending/landing domains for reputation checks."

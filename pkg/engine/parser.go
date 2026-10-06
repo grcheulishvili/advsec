@@ -40,6 +40,8 @@ type Context struct {
 	Raw string
 	// Truncated is true if input exceeded MaxBufferBytes.
 	Truncated bool
+	// Format is the classified input stream type (see classifier.go).
+	Format Format
 	// ExternalTarget is true when at least one routable (non-loopback,
 	// non-bind, non-private-noise) IP, IPv6, domain, or URL was found. Network
 	// attack rules can consult this to avoid firing on pure-localhost output.
@@ -165,6 +167,7 @@ func Parse(r io.Reader) (*Context, error) {
 func ParseString(raw string) *Context {
 	ctx := &Context{
 		Raw:      raw,
+		Format:   Classify(raw),
 		Entities: make(map[EntityKind][]string),
 	}
 
