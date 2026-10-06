@@ -279,3 +279,91 @@ tactics:
       binary: "gpp-decrypt"
       command: "gpp-decrypt <cpassword>"
       purpose: "Decrypt a GPP cPassword blob."
+---
+id: ps-encoded-command
+name: "PowerShell Encoded / Obfuscated Command"
+target_type: code
+domain: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: '-[Ee]nc(odedCommand)?\s|FromBase64String|\[System\.Convert\]|-join|char\[\]|\x60'
+tactics:
+  phase: "PowerShell Analysis (Deobfuscation)"
+  priority: 60
+  next_step: "Decode the Base64/obfuscation layers offline to recover the real command before it is attributed as benign."
+  tools:
+    - name: "decode base64 (CyberChef/py)"
+      binary: "python3"
+      step: 1
+      phase_label: "Phase 1: Static Decode"
+      command: "python3 -c \"import base64,sys; print(base64.b64decode(sys.argv[1]).decode('utf-16le','ignore'))\" <b64>"
+      purpose: "Decode a -EncodedCommand payload (UTF-16LE)."
+    - name: "PowerDecode"
+      binary: "pwsh"
+      step: 2
+      phase_label: "Phase 2: Layered Deobfuscation"
+      command: "pwsh ./PowerDecode.ps1 -inputFile {target}"
+      purpose: "Recursively deobfuscate and log nested PowerShell layers."
+      install: "git clone https://github.com/Malandrone/PowerDecode"
+---
+id: ps-download-cradle
+name: "PowerShell Download Cradle / Stager"
+target_type: code
+domain: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'IEX|Invoke-Expression|New-Object\s+Net\.WebClient|DownloadString|DownloadFile|Invoke-WebRequest|Start-BitsTransfer'
+tactics:
+  phase: "PowerShell Analysis (C2 Stager)"
+  priority: 65
+  next_step: "Extract the remote URL/host the cradle pulls from, enrich it against threat intel, then block egress before detonation."
+  tools:
+    - name: "extract URLs"
+      binary: "grep"
+      step: 1
+      phase_label: "Phase 1: Static Decode"
+      command: "grep -Eoi 'https?://[^\"'\\'' )]+' {target} | sort -u"
+      purpose: "Pull the stager download URLs for triage."
+    - name: "sandbox detonation"
+      binary: "pwsh"
+      step: 3
+      phase_label: "Phase 3: Dynamic Sandbox"
+      command: "# detonate in an isolated Windows VM with ScriptBlock logging enabled"
+      purpose: "Capture the second-stage payload and C2 behavior."
+---
+id: ps-amsi-evasion
+name: "PowerShell AMSI / Defender Evasion"
+target_type: code
+domain: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'amsiInitFailed|\[Ref\]\.Assembly|AmsiUtils|Set-MpPreference|-ExecutionPolicy\s+Bypass|Add-MpPreference.*Exclusion'
+tactics:
+  phase: "PowerShell Analysis (Evasion)"
+  priority: 62
+  next_step: "Flag the AV/AMSI tampering, confirm whether exclusions were added, and hunt the host for the technique's artifacts."
+  tools:
+    - name: "review evasion"
+      binary: "grep"
+      step: 1
+      phase_label: "Phase 1: Static Decode"
+      command: "grep -Ein 'amsi|Set-MpPreference|Add-MpPreference|ExecutionPolicy|Ref\\].Assembly' {target}"
+      purpose: "Surface AMSI/Defender tampering lines for the report."

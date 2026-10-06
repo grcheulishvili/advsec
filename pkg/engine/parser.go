@@ -30,6 +30,7 @@ const (
 	EntityMemAddr EntityKind = "mem_addr"
 	EntityCVE     EntityKind = "cve"
 	EntityEmail   EntityKind = "email"
+	EntityGPGKey  EntityKind = "gpg_key"
 )
 
 // Context is the structured view of a chunk of piped input. It carries both
@@ -97,6 +98,9 @@ var (
 	// hex values treated as memory addresses (otherwise 0x8007000D-style error
 	// codes would masquerade as pointers).
 	reDebugCtx = regexp.MustCompile(`(?i)\b(?:r[a-ds]x|r[sbi]p|rsi|rdi|r8|r9|r1[0-5]|e[a-d]x|e[sb]p|eip|gdb|pwndbg|\bgef\b|\$pc\b|backtrace|#\d+\s+0x|Program received signal|SIGSEGV|vmmap|got\b|plt\b)`)
+	// reGPGContext marks input where 40-hex tokens are PGP key fingerprints
+	// rather than SHA-1 digests.
+	reGPGContext = regexp.MustCompile(`(?i)recv-keys|pacman-key|gpg\s*--|--recv|fingerprint|gpg:|key server|keyserver|0x[0-9A-Fa-f]{16}`)
 )
 
 // loopbackOrBind reports whether an IP string is a loopback / unspecified /
@@ -242,7 +246,17 @@ func ParseString(raw string) *Context {
 			add(EntityPort, m[1])
 		}
 	}
-	add(EntityHash, reHash.FindAllString(raw, -1)...)
+	// Hashes, with a GPG-fingerprint exception: a 40-hex token in GPG key
+	// context (recv-keys, pacman-key, gpg --, "fingerprint") is a PGP key id,
+	// not a SHA-1 digest, so it must not drive hash-reputation/cracking rules.
+	gpgCtx := reGPGContext.MatchString(raw)
+	for _, m := range reHash.FindAllString(raw, -1) {
+		if len(m) == 40 && gpgCtx {
+			add(EntityGPGKey, m)
+			continue
+		}
+		add(EntityHash, m)
+	}
 
 	// Memory addresses: only when the input is actually a debugger / pwn dump.
 	// Otherwise hex values (Windows HRESULTs like 0x8007000D, color codes,

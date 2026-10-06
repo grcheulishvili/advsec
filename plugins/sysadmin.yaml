@@ -186,3 +186,35 @@ tactics:
       binary: "pacman"
       command: "sudo pacman -Sy archlinux-keyring && sudo pacman -Syu"
       purpose: "Refresh keyring and sync (Arch/BlackArch)."
+---
+id: sys-shell-script-review
+name: "Shell Script Review"
+target_type: host
+domain: sysadmin
+author: official
+os_packages:
+  arch: [shellcheck]
+  debian: [shellcheck]
+  kali: [shellcheck]
+match:
+  logic: any
+  rules:
+    - regex: '#!\s*/(bin|usr/bin)/(ba)?sh|#!\s*/usr/bin/env\s+(ba)?sh'
+    - regex: 'curl\s+[^|]+\|\s*(sudo\s+)?(ba)?sh|wget\s+[^|]+\|\s*(ba)?sh'
+tactics:
+  phase: "Script Review"
+  priority: 35
+  next_step: "Lint the script and audit it for curl|bash pipes, unquoted vars, and privilege escalation before running it."
+  tools:
+    - name: "shellcheck"
+      binary: "shellcheck"
+      step: 1
+      phase_label: "Phase 1: Static Lint"
+      command: "shellcheck {target}"
+      purpose: "Static analysis for shell scripting bugs and unsafe patterns."
+    - name: "audit remote pipes"
+      binary: "grep"
+      step: 1
+      phase_label: "Phase 1: Static Lint"
+      command: "grep -nE 'curl|wget|eval|sudo|chmod \\+x|/dev/tcp' {target}"
+      purpose: "Surface remote fetch-and-execute and privilege changes for review."

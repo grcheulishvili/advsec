@@ -12,7 +12,7 @@ import (
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "0.7.0"
+	Version = "0.9.0"
 	Commit  = "dev"
 	Date    = "unknown"
 )
@@ -49,8 +49,12 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	// When invoked with no subcommand, behave as `analyze` so that
-	// `… | advsec` works as the primary use case.
+	// `... | advsec` works as the primary use case. With no piped stdin and no
+	// --input, there is nothing to analyze, so print help and exit 0.
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if flagInputFile == "" && stdinIsTTY() {
+			return cmd.Help()
+		}
 		return runAnalyze(cmd, args)
 	},
 }

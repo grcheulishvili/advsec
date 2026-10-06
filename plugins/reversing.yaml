@@ -166,6 +166,8 @@ match:
   rules:
     - regex: 'PE32\+? executable'
     - contains: "for MS Windows"
+    - contains: "This program cannot be run in DOS mode"
+    - regex: '\bMZ\b|MZ\x90'
 tactics:
   phase: "Reverse Engineering (Windows)"
   priority: 42

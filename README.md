@@ -19,7 +19,7 @@ cat phish.eml        | advsec
 - **Action-chain phase sequencing** - groups suggestions into ordered phases (passive triage first, destructive actions last) and reorders them around an inferred intent (reputation lookup, post-mortem triage, immediate containment).
 - **Native package manager integration** - every suggested tool is checked against `PATH`; missing ones come with the exact install command for the host (`pacman`/`yay` on Arch, `apt` on Debian/Kali, or a `pipx`/`go`/`cargo` hint when not distro-packaged).
 - **Asset verification** - hardcoded paths like `/usr/share/wordlists/rockyou.txt` are `os.Stat`-checked, substituted from known locations when possible, or flagged with an install tip.
-- **Offline YAML plugin system** - 132 rules across 17 domains, loaded from local files. No network needed at runtime; `advsec plugin update` pulls the latest set anonymously over HTTPS.
+- **Offline YAML plugin system** - 136 rules across 17 domains, loaded from local files. No network needed at runtime; `advsec plugin update` pulls the latest set anonymously over HTTPS.
 - **Single static binary** - Go, zero runtime dependencies, sub-20 ms on typical piped input.
 
 ---
@@ -125,7 +125,7 @@ advsec init zsh  >> ~/.zshrc     # or:
 advsec init bash >> ~/.bashrc
 ```
 
-Then press **Ctrl+Alt+A** after any command. (Under zsh, Ctrl+Alt+S analyzes the current buffer instead.)
+Press **Ctrl+Alt+A** (or **Alt+A**) after any command to analyze its output. Under zsh, Ctrl+Alt+S analyzes the current buffer instead. Every binding is registered with `2>/dev/null`, so an unsupported key sequence is silently skipped rather than printing a terminal error.
 
 ### Shell runtime guards
 
@@ -201,7 +201,13 @@ advsec update-cache                # refresh the OS package-mapping cache
 | `--no-color` | Disable ANSI styling |
 | `-f, --input FILE` | Read from a file instead of stdin |
 
-Subcommands: `analyze` (default), `plugin list|install|update`, `update-cache`, `init zsh|bash`.
+Subcommands: `analyze` (default), `plugin list|install|update`, `update-cache`, `init zsh|bash` (with `--install`).
+
+Run with no piped input and no flags (`advsec` in an interactive terminal) to print this help and exit 0.
+
+### Validation harness
+
+`go test ./...` runs a mock sandbox (`pkg/engine/sandbox_test.go`) and a domain matrix (`pkg/engine/matrix_test.go`) that feed realistic payloads (JS, PowerShell, shell+GPG, nmap, cloud configs, logs, email, ELF/PE) through the full pipeline and assert format classification, domain scoping, vendor-noise filtering, GPG-vs-SHA1 disambiguation, and that no raw `{target*}` placeholder ever leaks. `go test -v -run Diagnostics ./pkg/engine/` prints a self-diagnostic report of any misclassifications, vendor noise, missing-asset tips, coverage gaps, or out-of-order action chains.
 
 ---
 
@@ -215,7 +221,7 @@ advsec/
 |  |- engine/      parser, classifier, matcher, evaluator, sequence, assets
 |  |- osdetect/    distro detection + package manager mapping
 |  |- plugin/      YAML types, loader, lifecycle manager
-|- plugins/        132 rules across 17 domain files
+|- plugins/        136 rules across 17 domain files
 |- Makefile
 |- PKGBUILD
 |- install.sh

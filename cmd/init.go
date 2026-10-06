@@ -151,7 +151,9 @@ if [ -n "$ZSH_VERSION" ]; then
         eval "$last" 2>&1 | advsec --top 3
     }
     zle -N _advsec_widget
-    bindkey '^[^A' _advsec_widget   # Ctrl+Alt+A
+    bindkey '^[^A' _advsec_widget 2>/dev/null   # Ctrl+Alt+A
+    bindkey '^[a'  _advsec_widget 2>/dev/null   # Alt+a
+    bindkey '^[A'  _advsec_widget 2>/dev/null   # Alt+A
 
     # Ctrl+Alt+S analyzes the current buffer instead of the last command.
     _advsec_buffer_widget() {
@@ -161,7 +163,7 @@ if [ -n "$ZSH_VERSION" ]; then
         zle reset-prompt
     }
     zle -N _advsec_buffer_widget
-    bindkey '^[^S' _advsec_buffer_widget   # Ctrl+Alt+S
+    bindkey '^[^S' _advsec_buffer_widget 2>/dev/null   # Ctrl+Alt+S
 fi
 # <<< advsec shell integration (zsh) <<<
 `
@@ -177,7 +179,9 @@ if [ -n "$BASH_VERSION" ]; then
         echo
         eval "$last" 2>&1 | advsec --top 3
     }
-    bind -x '"\e\C-a": _advsec_widget'   # Ctrl+Alt+A
+    bind -x '"\e\C-a": _advsec_widget' 2>/dev/null   # Ctrl+Alt+A
+    bind -x '"\ea": _advsec_widget' 2>/dev/null      # Alt+a
+    bind -x '"\eA": _advsec_widget' 2>/dev/null      # Alt+A
 fi
 # <<< advsec shell integration (bash) <<<
 `

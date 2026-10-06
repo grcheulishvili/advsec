@@ -129,6 +129,13 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// stdinIsTTY reports whether stdin is an interactive terminal (i.e. nothing was
+// piped or redirected in).
+func stdinIsTTY() bool {
+	st, err := os.Stdin.Stat()
+	return err == nil && (st.Mode()&os.ModeCharDevice) != 0
+}
+
 func readInput() (string, error) {
 	if flagInputFile != "" {
 		data, err := os.ReadFile(flagInputFile)
