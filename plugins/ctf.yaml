@@ -1,0 +1,155 @@
+# CTF-focused plugins — steganography, esoteric encodings, and misc challenge
+# patterns. Triggered by `file` output on media and challenge text.
+---
+id: ctf-image-stego
+name: "Image File (Steganography Triage)"
+target_type: ctf
+author: official
+os_packages:
+  arch: [steghide, outguess, perl-image-exiftool]
+  debian: [steghide, outguess, libimage-exiftool-perl]
+  kali: [steghide, outguess, libimage-exiftool-perl]
+match:
+  logic: any
+  rules:
+    - regex: 'PNG image data|JPEG image data|GIF image data|bitmap'
+tactics:
+  phase: "CTF (Stego)"
+  priority: 30
+  next_step: "Run the standard stego pipeline: metadata, strings, LSB/zsteg, binwalk, then tool-specific extraction."
+  tools:
+    - name: "exiftool + strings"
+      binary: "exiftool"
+      command: "exiftool {target} ; strings -n 6 {target} | grep -i flag"
+      purpose: "Metadata and plaintext quick wins."
+    - name: "zsteg (PNG/BMP)"
+      binary: "zsteg"
+      command: "zsteg -a {target}"
+      purpose: "Detect LSB and channel-based hiding."
+      install: "gem install zsteg"
+    - name: "steghide extract"
+      binary: "steghide"
+      command: "steghide extract -sf {target}"
+      purpose: "Extract a JPEG/WAV payload (try empty + wordlist passphrases)."
+    - name: "binwalk"
+      binary: "binwalk"
+      command: "binwalk -eM {target}"
+      purpose: "Find appended/embedded archives."
+---
+id: ctf-audio-stego
+name: "Audio File (Stego / Spectrogram)"
+target_type: ctf
+author: official
+os_packages:
+  arch: [sox]
+  debian: [sox]
+  kali: [sox]
+match:
+  logic: any
+  rules:
+    - regex: 'WAVE audio|Audio file|MPEG.*layer III|FLAC audio|Ogg data'
+tactics:
+  phase: "CTF (Audio Stego)"
+  priority: 28
+  next_step: "Check the spectrogram for hidden text/QR, then test LSB and DTMF/morse decoding."
+  tools:
+    - name: "spectrogram"
+      binary: "sox"
+      command: "sox {target} -n spectrogram -o spec.png"
+      purpose: "Render a spectrogram to reveal visual payloads."
+---
+id: ctf-esoteric-lang
+name: "Esoteric Language / Encoding"
+target_type: ctf
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: '\+\+\+\+\+|\[->\+<\]|Brainfuck|Ook\.|\.\.\.---\.\.\.|[01]{8}\s[01]{8}'
+tactics:
+  phase: "CTF (Decode)"
+  priority: 26
+  next_step: "Identify the encoding/esolang (Brainfuck, Ook, Morse, binary) and run it through the matching interpreter."
+  tools:
+    - name: "CyberChef Magic"
+      binary: "cyberchef"
+      command: "# CyberChef -> Magic / the matching decoder recipe"
+      purpose: "Auto-detect and chain decoders."
+    - name: "dcode hint"
+      binary: "curl"
+      command: "# dcode.fr identifies ciphers/encodings interactively"
+      purpose: "Cipher identification for stubborn blobs."
+---
+id: ctf-archive-cracking
+name: "Password-Protected Archive"
+target_type: ctf
+author: official
+os_packages:
+  arch: [john, fcrackzip]
+  debian: [john, fcrackzip]
+  kali: [john, fcrackzip]
+match:
+  logic: any
+  rules:
+    - regex: 'Zip archive.*encrypted|password protected|encrypted.*archive|RAR archive'
+tactics:
+  phase: "CTF (Archive)"
+  priority: 32
+  next_step: "Extract the archive hash with the *2john tool, then crack it with john/hashcat."
+  tools:
+    - name: "zip2john"
+      binary: "zip2john"
+      command: "zip2john {target} > zip.hash ; john --wordlist=/usr/share/wordlists/rockyou.txt zip.hash"
+      purpose: "Hash and crack the archive password."
+    - name: "fcrackzip"
+      binary: "fcrackzip"
+      command: "fcrackzip -u -D -p /usr/share/wordlists/rockyou.txt {target}"
+      purpose: "Direct dictionary attack on a zip."
+---
+id: ctf-qr-barcode
+name: "QR / Barcode Image"
+target_type: ctf
+author: official
+os_packages:
+  arch: [zbar]
+  debian: [zbar-tools]
+  kali: [zbar-tools]
+match:
+  logic: any
+  rules:
+    - regex: 'QR code|barcode|zbar|datamatrix'
+tactics:
+  phase: "CTF (Decode)"
+  priority: 24
+  next_step: "Decode the symbol to text — it may contain the flag or a next-stage URL."
+  tools:
+    - name: "zbarimg"
+      binary: "zbarimg"
+      command: "zbarimg {target}"
+      purpose: "Decode QR/barcodes from an image."
+---
+id: ctf-pyjail
+name: "Python Jail / Sandbox Escape"
+target_type: ctf
+author: official
+os_packages:
+  arch: [python]
+  debian: [python3]
+  kali: [python3]
+match:
+  logic: any
+  rules:
+    - regex: 'pyjail|sandbox|__builtins__|eval\(input|exec\(input|forbidden|blacklist'
+tactics:
+  phase: "CTF (Escape)"
+  priority: 34
+  next_step: "Enumerate the allowed builtins/attributes, then reach os/system via object traversal or import tricks."
+  tools:
+    - name: "builtins probe"
+      binary: "python3"
+      command: "# try: ().__class__.__bases__[0].__subclasses__() to reach os via subclasses"
+      purpose: "Classic subclass-walk to regain code execution."

@@ -1,4 +1,4 @@
-# advsec - build, test, and install targets.
+# advsec — build, test, and install targets.
 BINARY      := advsec
 PKG         := github.com/grcheulishvili/advsec
 CMD_PKG     := $(PKG)/cmd

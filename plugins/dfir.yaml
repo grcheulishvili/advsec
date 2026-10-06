@@ -1,144 +1,150 @@
-# Digital Forensics & Incident Response plugins.
-# Triggered by journalctl / log output, file hashes, and suspicious artifacts.
+# Host incident-response plugins — live-triage patterns distinct from the
+# detection rules in blueteam.yaml.
 ---
-id: dfir-failed-auth
-name: Authentication Failures in Logs
+id: dfir-reverse-shell
+name: "Reverse Shell / Suspicious Child Process"
 target_type: host
 author: official
 os_packages:
-  arch: [fail2ban]
-  debian: [fail2ban]
-  kali: [fail2ban]
+  arch: [lsof, procps-ng]
+  debian: [lsof, procps]
+  kali: [lsof, procps]
 match:
   logic: any
   rules:
-    - regex: "Failed password for"
-    - regex: "authentication failure"
-    - regex: "Invalid user"
+    - regex: 'bash -i|nc -e|/dev/tcp/|sh -i|python.*socket.*connect|mkfifo.*nc|socat.*exec'
 tactics:
-  phase: "Incident Response (Access)"
+  phase: "Incident Response (Execution)"
+  priority: 70
+  next_step: "Identify the process and its parent, capture the socket, then contain before killing so you keep evidence."
+  tools:
+    - name: "network-backed procs"
+      binary: "lsof"
+      command: "lsof -i -nP | grep -E 'ESTABLISHED|LISTEN'"
+      purpose: "Map processes to their network connections."
+    - name: "process tree"
+      binary: "ps"
+      command: "ps -ef --forest"
+      purpose: "Spot shells spawned by services/web processes."
+---
+id: dfir-suspicious-outbound
+name: "Suspicious Outbound Connection"
+target_type: host
+author: official
+os_packages:
+  arch: [iproute2, lsof]
+  debian: [iproute2, lsof]
+  kali: [iproute2, lsof]
+match:
+  logic: any
+  rules:
+    - regex: 'ESTABLISHED.*:(4444|1337|9001|8443|6667)|curl .*\|.*sh|wget .*-O- .*\|.*sh|outbound'
+tactics:
+  phase: "Incident Response (C2 / Exfil)"
+  priority: 62
+  next_step: "Attribute the remote endpoint and owning process, then block egress and preserve the binary on disk."
+  tools:
+    - name: "connections"
+      binary: "ss"
+      command: "ss -tupn state established"
+      purpose: "List established connections with owning PIDs."
+---
+id: dfir-new-account
+name: "New / Modified User Account"
+target_type: host
+author: official
+os_packages:
+  arch: [shadow]
+  debian: [passwd]
+  kali: [passwd]
+match:
+  logic: any
+  rules:
+    - regex: 'new user|useradd|usermod|new group|UID 0|:0:0:|passwd changed|added to group (sudo|wheel|root)'
+tactics:
+  phase: "Incident Response (Persistence)"
   priority: 60
-  next_step: "Correlate the source IPs and accounts, determine if any attempt succeeded, then contain the source."
+  next_step: "Review account/group changes for rogue UID-0 users or privileged-group additions, then lock and investigate."
   tools:
-    - name: journalctl ssh
-      binary: journalctl
-      command: "journalctl -u ssh --since '-24h' | grep -Ei 'accepted|failed'"
-      purpose: "Separate successful from failed logins in the last day."
-    - name: fail2ban-client
-      binary: fail2ban-client
-      command: "fail2ban-client set sshd banip {target_ip}"
-      purpose: "Ban the offending source IP immediately."
-    - name: lastb
-      binary: lastb
-      command: "lastb -a | head -n 50"
-      purpose: "Review recent bad login attempts with source hosts."
+    - name: "uid-0 accounts"
+      binary: "awk"
+      command: "awk -F: '($3==0){print $1}' /etc/passwd ; getent group sudo wheel"
+      purpose: "Find all root-equivalent accounts and admin-group members."
+    - name: "account timeline"
+      binary: "stat"
+      command: "stat /etc/passwd /etc/shadow /etc/sudoers"
+      purpose: "Check when auth files were last modified."
 ---
-id: dfir-privilege-escalation
-name: Privilege Escalation / sudo Activity
+id: dfir-modified-binary
+name: "Tampered System Binary / Rootkit"
 target_type: host
 author: official
 os_packages:
-  arch: [audit]
-  debian: [auditd]
-  kali: [auditd]
+  arch: [rkhunter]
+  debian: [rkhunter, debsums]
+  kali: [rkhunter]
 match:
   logic: any
   rules:
-    - regex: "sudo:.*COMMAND="
-    - regex: "session opened for user root"
-    - contains: "pam_unix(sudo:session)"
+    - regex: 'LD_PRELOAD|ld\.so\.preload|hidden process|rootkit|checksum mismatch|modified binary|/tmp/\.[a-z]'
 tactics:
-  phase: "Incident Response (Privilege)"
-  priority: 55
-  next_step: "Review which users invoked root and what commands ran; flag anything outside normal change windows."
+  phase: "Incident Response (Integrity)"
+  priority: 65
+  next_step: "Verify core binaries against the package database and check preload/kernel-module hiding."
   tools:
-    - name: journalctl sudo
-      binary: journalctl
-      command: "journalctl _COMM=sudo --since '-24h'"
-      purpose: "Review all sudo invocations in the last day."
-    - name: ausearch
-      binary: ausearch
-      command: "ausearch -m USER_CMD --start recent"
-      purpose: "Pull executed commands from the audit log."
+    - name: "verify packages"
+      binary: "debsums"
+      command: "debsums -c 2>/dev/null"
+      purpose: "Find package files whose checksums changed (Debian/Kali)."
+    - name: "arch integrity"
+      binary: "pacman"
+      command: "pacman -Qkk 2>/dev/null | grep -v '0 altered'"
+      purpose: "Verify installed files against the package DB (Arch)."
+    - name: "rkhunter"
+      binary: "rkhunter"
+      command: "rkhunter --check --sk"
+      purpose: "Scan for known rootkit indicators."
 ---
-id: dfir-malware-hash
-name: File Hash Present (Reputation Check)
-target_type: artifact
-author: official
-os_packages:
-  arch: [yara]
-  debian: [yara]
-  kali: [yara]
-match:
-  logic: any
-  rules:
-    - entity_type: hash
-tactics:
-  phase: "Malware Triage"
-  priority: 20
-  next_step: "Check the hash against threat-intel sources and scan the sample with YARA before any dynamic analysis."
-  tools:
-    - name: vt lookup (manual)
-      binary: curl
-      command: "curl -s 'https://www.virustotal.com/gui/file/{target_hash}'"
-      purpose: "Open the hash's reputation page (requires a VT account/API for programmatic use)."
-    - name: yara
-      binary: yara
-      command: "yara -r /usr/share/yara-rules/ {target}"
-      purpose: "Scan the artifact against known malware signatures."
----
-id: dfir-oom-kernel
-name: Kernel OOM / Hardware Errors
+id: dfir-bash-history
+name: "Shell History IOCs"
 target_type: host
 author: official
 os_packages:
-  arch: [util-linux]
-  debian: [util-linux]
-  kali: [util-linux]
+  arch: [ripgrep]
+  debian: [ripgrep]
+  kali: [ripgrep]
 match:
   logic: any
   rules:
-    - contains: "Out of memory"
-    - regex: "oom-killer|Killed process"
-    - regex: "Hardware Error|mce:"
+    - regex: 'history -c|unset HISTFILE|export HISTSIZE=0|chattr|wget http|curl http.*sh|base64 -d'
 tactics:
-  phase: "Host Health Triage"
-  priority: 25
-  next_step: "Identify the process(es) killed and whether this is resource exhaustion, a leak, or failing hardware."
+  phase: "Incident Response (Activity)"
+  priority: 50
+  next_step: "History-clearing is itself an IOC — recover shell history from all users and memory, and reconstruct actions."
   tools:
-    - name: journalctl kernel
-      binary: journalctl
-      command: "journalctl -k -p err --since '-6h'"
-      purpose: "Show recent kernel-level error messages."
-    - name: dmesg
-      binary: dmesg
-      command: "dmesg -T --level=err,crit"
-      purpose: "Review timestamped kernel errors and the OOM report."
+    - name: "all histories"
+      binary: "find"
+      command: "find /root /home -maxdepth 2 -name '.*_history' -exec ls -la {} \\;"
+      purpose: "Locate every shell-history file on the host."
 ---
-id: dfir-service-crash
-name: Service Crash / Segfault
+id: dfir-scheduled-task
+name: "Malicious Scheduled Task"
 target_type: host
 author: official
 os_packages:
-  arch: [systemd-coredump, gdb]
-  debian: [systemd-coredump, gdb]
-  kali: [systemd-coredump, gdb]
+  arch: [cronie]
+  debian: [cron]
+  kali: [cron]
 match:
   logic: any
   rules:
-    - regex: "segfault at [0-9a-f]+"
-    - contains: "core dumped"
-    - regex: "Main process exited.*status=[0-9]+/"
+    - regex: '@reboot|\* \* \* \* \*|crontab -|/etc/cron|at now|systemd-run|OnCalendar='
 tactics:
-  phase: "Crash / Stability Triage"
-  priority: 30
-  next_step: "Pull the recorded core dump for the crashing service and inspect the faulting frame."
+  phase: "Incident Response (Persistence)"
+  priority: 54
+  next_step: "Enumerate all cron/at/systemd-timer entries for every user and flag anything fetching or decoding payloads."
   tools:
-    - name: coredumpctl
-      binary: coredumpctl
-      command: "coredumpctl list"
-      purpose: "List captured core dumps to pick the relevant crash."
-    - name: coredumpctl gdb
-      binary: coredumpctl
-      command: "coredumpctl gdb"
-      purpose: "Open the most recent core dump directly in gdb."
+    - name: "all cron"
+      binary: "bash"
+      command: "for u in $(cut -f1 -d: /etc/passwd); do echo \"== $u\"; crontab -lu $u 2>/dev/null; done; cat /etc/cron*/* 2>/dev/null"
+      purpose: "Dump every user and system cron entry."

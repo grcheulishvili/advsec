@@ -1,0 +1,160 @@
+# General-usability plugins — everyday file/data handling, triggered mostly by
+# `file`, and useful to sysadmins and analysts alike.
+---
+id: gen-archive
+name: "Compressed Archive"
+target_type: general
+author: official
+os_packages:
+  arch: [p7zip, tar, unzip]
+  debian: [p7zip-full, tar, unzip]
+  kali: [p7zip-full, tar, unzip]
+match:
+  logic: any
+  rules:
+    - regex: '(Zip|gzip|XZ|bzip2|7-zip|RAR|tar) (archive|compressed)|\.(zip|tar\.gz|tgz|tar\.xz|7z|rar|bz2)\b'
+tactics:
+  phase: "General (Archive)"
+  priority: 12
+  next_step: "List the contents first, then extract to a clean directory and inspect for nested archives."
+  tools:
+    - name: "list + extract (7z)"
+      binary: "7z"
+      command: "7z l {target} ; 7z x {target} -o./extracted"
+      purpose: "Handle virtually any archive format uniformly."
+    - name: "tar"
+      binary: "tar"
+      command: "tar tf {target} | head ; tar xf {target} -C ./extracted"
+      purpose: "Inspect and extract tar-based archives."
+---
+id: gen-document
+name: "Office / PDF Document"
+target_type: general
+author: official
+os_packages:
+  arch: [poppler, libreoffice-still]
+  debian: [poppler-utils, libreoffice]
+  kali: [poppler-utils, libreoffice]
+match:
+  logic: any
+  rules:
+    - regex: 'PDF document|Microsoft (Word|Excel|PowerPoint)|OpenDocument|Composite Document|Rich Text Format|\.(docx|xlsx|pptx|pdf)\b'
+tactics:
+  phase: "General (Documents)"
+  priority: 15
+  next_step: "Extract text and metadata; for Office files check for macros, and for PDFs check for JS/embedded files."
+  tools:
+    - name: "pdf text + info"
+      binary: "pdftotext"
+      command: "pdfinfo {target} ; pdftotext {target} - | head"
+      purpose: "Metadata and text extraction from PDFs."
+    - name: "macro check (oletools)"
+      binary: "olevba"
+      command: "olevba {target}"
+      purpose: "Detect and dump VBA macros in Office files."
+      install: "pipx install oletools"
+---
+id: gen-data-format
+name: "Structured Data (JSON / XML / YAML / CSV)"
+target_type: general
+author: official
+os_packages:
+  arch: [jq, ripgrep]
+  debian: [jq, ripgrep]
+  kali: [jq, ripgrep]
+match:
+  logic: any
+  rules:
+    - regex: 'JSON data|XML .*document|CSV text|\.(json|xml|yaml|yml|csv|tsv)\b'
+tactics:
+  phase: "General (Data)"
+  priority: 10
+  next_step: "Pretty-print and query the structure; mine it for hosts, credentials, and identifiers."
+  tools:
+    - name: "jq explore"
+      binary: "jq"
+      command: "jq -C . {target} | head -50"
+      purpose: "Pretty-print and navigate JSON."
+    - name: "secrets grep"
+      binary: "rg"
+      command: "rg -i 'pass|token|secret|key|host|url' {target}"
+      purpose: "Surface interesting fields quickly."
+---
+id: gen-git-repo
+name: "Git Repository"
+target_type: general
+author: official
+os_packages:
+  arch: [git]
+  debian: [git]
+  kali: [git]
+match:
+  logic: any
+  rules:
+    - regex: '\.git\b|git repository|On branch|commit [0-9a-f]{7,40}|HEAD ->'
+tactics:
+  phase: "General (Source)"
+  priority: 14
+  next_step: "Scan the full history for secrets — deleted commits still hold them — then review branches and config."
+  tools:
+    - name: "history secrets"
+      binary: "gitleaks"
+      command: "gitleaks detect --source . -v"
+      purpose: "Scan git history for leaked secrets."
+      install: "go install github.com/gitleaks/gitleaks/v8@latest"
+    - name: "log overview"
+      binary: "git"
+      command: "git log --oneline --all --stat | head -40"
+      purpose: "Review recent changes across all branches."
+---
+id: gen-sqlite-db
+name: "Database File (SQLite)"
+target_type: general
+author: official
+os_packages:
+  arch: [sqlite]
+  debian: [sqlite3]
+  kali: [sqlite3]
+match:
+  logic: any
+  rules:
+    - regex: 'SQLite 3\.x database|\.(db|sqlite|sqlite3)\b|SQLite format 3'
+tactics:
+  phase: "General (Database)"
+  priority: 16
+  next_step: "Enumerate tables and dump high-value ones — app DBs often store users, sessions, and tokens."
+  tools:
+    - name: "sqlite tables"
+      binary: "sqlite3"
+      command: "sqlite3 {target} '.tables' ; sqlite3 {target} '.schema'"
+      purpose: "List tables and schema."
+    - name: "dump users"
+      binary: "sqlite3"
+      command: "sqlite3 {target} 'SELECT * FROM users LIMIT 20;'"
+      purpose: "Inspect likely credential tables."
+---
+id: gen-unknown-binary
+name: "Unknown / Raw Data File"
+target_type: general
+author: official
+os_packages:
+  arch: [file, binwalk, xxd]
+  debian: [file, binwalk, xxd]
+  kali: [file, binwalk, xxd]
+match:
+  logic: any
+  rules:
+    - regex: '\bdata\b$|unknown format|raw data|octet-stream'
+tactics:
+  phase: "General (Triage)"
+  priority: 5
+  next_step: "Unrecognized blob — check magic bytes, entropy, and embedded signatures to decide the handling path."
+  tools:
+    - name: "hexdump head"
+      binary: "xxd"
+      command: "xxd {target} | head -20"
+      purpose: "Inspect magic bytes and structure."
+    - name: "binwalk signatures"
+      binary: "binwalk"
+      command: "binwalk {target}"
+      purpose: "Scan for embedded file signatures."

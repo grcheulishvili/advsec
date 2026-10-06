@@ -1,8 +1,8 @@
-# Binary exploitation / reverse engineering plugins.
-# Triggered primarily by `file <binary>` output and gdb/checksec context.
+# Binary exploitation plugins — triggered by `file`, checksec, gdb, and
+# CTF pwn artifact context.
 ---
 id: pwn-elf64-exec-stack
-name: ELF 64-bit Executable (Executable Stack / No NX)
+name: "ELF 64-bit (Executable Stack / No NX)"
 target_type: binary
 author: official
 os_packages:
@@ -12,108 +12,207 @@ os_packages:
 match:
   logic: all
   rules:
-    - regex: "ELF 64-bit"
-    - regex: "executable stack|not stripped"
+    - regex: 'ELF 64-bit'
+    - regex: 'executable stack|not stripped'
 tactics:
   phase: "Binary Exploitation / Reverse Engineering"
   priority: 60
-  next_step: "Confirm missing protections, then find the stack buffer-overflow offset with a cyclic pattern and build a shellcode payload."
+  next_step: "Confirm missing protections, find the saved-RIP offset with a cyclic pattern, then build a payload."
   tools:
-    - name: checksec
-      binary: checksec
+    - name: "checksec"
+      binary: "checksec"
       command: "checksec --file={target}"
-      purpose: "Enumerate binary protections (RELRO, Stack Canary, NX, PIE, Fortify)."
-    - name: pwntools template
-      binary: pwn
+      purpose: "Enumerate RELRO, Stack Canary, NX, PIE, and Fortify."
+    - name: "pwntools template"
+      binary: "pwn"
       command: "pwn template {target} > exploit.py"
-      purpose: "Generate an exploit-script skeleton wired to the target binary."
-    - name: radare2
-      binary: r2
-      command: "r2 -AA {target}"
-      purpose: "Static analysis: functions, strings, and cross-references."
-    - name: gdb + cyclic
-      binary: gdb
+      purpose: "Generate an exploit-script skeleton wired to the target."
+      install: "pipx install pwntools"
+    - name: "gdb + pwndbg"
+      binary: "gdb"
       command: "gdb -q {target}"
-      purpose: "Dynamic analysis; use `cyclic`/`pattern create` to locate the saved-RIP offset."
+      purpose: "Dynamic analysis; cyclic/pattern to locate the offset."
 ---
-id: pwn-elf32
-name: ELF 32-bit Executable
+id: pwn-no-canary
+name: "ELF without Stack Canary"
 target_type: binary
 author: official
 os_packages:
-  arch: [checksec, gdb, radare2, python-pwntools]
-  debian: [checksec, gdb, radare2, python3-pwntools]
-  kali: [checksec, gdb, radare2, python3-pwntools]
+  arch: [gdb, python-pwntools]
+  debian: [gdb, python3-pwntools]
+  kali: [gdb, python3-pwntools]
 match:
   logic: all
   rules:
-    - regex: "ELF 32-bit"
+    - regex: 'No canary found|Canary\s*:?\s*No'
 tactics:
-  phase: "Binary Exploitation (x86)"
-  priority: 40
-  next_step: "Treat as 32-bit: arguments pass on the stack. Check protections and look for classic ret2libc / ret2win paths."
+  phase: "Binary Exploitation (Stack Overflow)"
+  priority: 65
+  next_step: "No canary means a straight stack smash is viable — overwrite saved RIP directly."
   tools:
-    - name: checksec
-      binary: checksec
-      command: "checksec --file={target}"
-      purpose: "Enumerate binary protections."
-    - name: ropper
-      binary: ropper
-      command: "ropper --file {target} --search 'pop|ret'"
-      purpose: "Find ROP gadgets for chain construction."
+    - name: "pattern offset"
+      binary: "pwn"
+      command: "pwn cyclic 200 ; pwn cyclic -l <crash_value>"
+      purpose: "Create and resolve a cyclic pattern to find the overflow offset."
+      install: "pipx install pwntools"
+    - name: "ropper"
+      binary: "ropper"
+      command: "ropper --file {target} --search 'pop rdi; ret'"
+      purpose: "Find gadgets for a ret2libc / ROP chain."
+      install: "pipx install ropper"
 ---
-id: pwn-statically-linked
-name: Statically-linked ELF
+id: pwn-nx-enabled-rop
+name: "NX Enabled (ROP Required)"
 target_type: binary
 author: official
 os_packages:
-  arch: [radare2, ropper, gdb]
-  debian: [radare2, ropper, gdb]
-  kali: [radare2, ropper, gdb]
-match:
-  logic: all
-  rules:
-    - regex: "ELF "
-    - regex: "statically linked"
-tactics:
-  phase: "Binary Exploitation (static)"
-  priority: 55
-  next_step: "No libc to leak - hunt for ROP gadgets and syscall primitives directly inside the binary (ret2syscall)."
-  tools:
-    - name: ropper
-      binary: ropper
-      command: "ropper --file {target} --search 'syscall'"
-      purpose: "Locate syscall gadgets for a ret2syscall chain."
-    - name: ROPgadget
-      binary: ROPgadget
-      command: "ROPgadget --binary {target} --ropchain"
-      purpose: "Auto-generate a ROP chain where possible."
----
-id: pwn-windows-pe
-name: Windows PE Executable
-target_type: binary
-author: official
-os_packages:
-  arch: [radare2, mono]
-  debian: [radare2, mono-runtime]
-  kali: [radare2, mono-runtime]
+  arch: [ropgadget, ropper, radare2]
+  debian: [python3-ropgadget, ropper, radare2]
+  kali: [python3-ropgadget, ropper, radare2]
 match:
   logic: any
   rules:
-    - regex: "PE32\\+? executable"
-    - contains: "for MS Windows"
+    - regex: 'NX\s*:?\s*enabled|NX enabled'
 tactics:
-  phase: "Reverse Engineering (Windows)"
-  priority: 45
-  next_step: "Inspect imports/exports and sections; detonate in an isolated Windows VM for dynamic analysis."
+  phase: "Binary Exploitation (ROP)"
+  priority: 55
+  next_step: "Stack is non-executable — chain existing gadgets (ret2libc / ret2syscall) instead of injecting shellcode."
   tools:
-    - name: radare2
-      binary: r2
-      command: "r2 -AA {target}"
-      purpose: "Static triage of PE imports, sections, and entry point."
+    - name: "ROPgadget"
+      binary: "ROPgadget"
+      command: "ROPgadget --binary {target} --ropchain"
+      purpose: "Enumerate gadgets and auto-build a chain where possible."
+      install: "pipx install ropgadget"
+    - name: "one_gadget"
+      binary: "one_gadget"
+      command: "one_gadget ./libc.so.6"
+      purpose: "Find single-shot execve(/bin/sh) gadgets in libc."
+      install: "gem install one_gadget"
+---
+id: pwn-format-string
+name: "Format String Primitive Suspected"
+target_type: binary
+author: official
+os_packages:
+  arch: [gdb, python-pwntools]
+  debian: [gdb, python3-pwntools]
+  kali: [gdb, python3-pwntools]
+match:
+  logic: any
+  rules:
+    - regex: 'printf|%n|%p%p%p|format string'
+tactics:
+  phase: "Binary Exploitation (Format String)"
+  priority: 45
+  next_step: "Probe the format specifier to leak stack/canary/libc, then use %n to achieve an arbitrary write."
+  tools:
+    - name: "fmtstr offset"
+      binary: "pwn"
+      command: "python3 -c \"from pwn import *; print(fmtstr_payload(6, {}))\""
+      purpose: "Compute a format-string write payload with pwntools."
+      install: "pipx install pwntools"
+---
+id: pwn-heap-glibc
+name: "Heap / glibc malloc Target"
+target_type: binary
+author: official
+os_packages:
+  arch: [gdb, glibc]
+  debian: [gdb, libc6-dbg]
+  kali: [gdb, libc6-dbg]
+match:
+  logic: any
+  rules:
+    - regex: 'malloc|free\(\)|tcache|fastbin|unsorted bin|__libc_'
+tactics:
+  phase: "Binary Exploitation (Heap)"
+  priority: 50
+  next_step: "Identify the glibc version and allocator behavior; look for UAF, double-free, or tcache poisoning."
+  tools:
+    - name: "pwndbg heap"
+      binary: "gdb"
+      command: "gdb -q {target} -ex 'heap' -ex 'bins'"
+      purpose: "Inspect heap chunks and bin state (needs pwndbg/gef)."
+    - name: "libc database"
+      binary: "libc-database"
+      command: "./find <symbol> <offset>"
+      purpose: "Identify the exact libc from leaked symbol offsets."
+      install: "git clone https://github.com/niklasb/libc-database"
+---
+id: pwn-pie-enabled
+name: "PIE Enabled (Leak Required)"
+target_type: binary
+author: official
+os_packages:
+  arch: [gdb, radare2]
+  debian: [gdb, radare2]
+  kali: [gdb, radare2]
+match:
+  logic: any
+  rules:
+    - regex: 'PIE\s*:?\s*enabled|Position Independent'
+tactics:
+  phase: "Binary Exploitation (PIE)"
+  priority: 40
+  next_step: "Base is randomized — leak a code/stack address first, then compute gadget addresses relative to it."
+  tools:
+    - name: "vmmap"
+      binary: "gdb"
+      command: "gdb -q {target} -ex 'break main' -ex 'run' -ex 'vmmap'"
+      purpose: "Observe the randomized base layout at runtime."
+---
+id: pwn-statically-linked
+name: "Statically-linked ELF"
+target_type: binary
+author: official
+os_packages:
+  arch: [ropgadget, radare2, gdb]
+  debian: [python3-ropgadget, radare2, gdb]
+  kali: [python3-ropgadget, radare2, gdb]
+match:
+  logic: all
+  rules:
+    - regex: 'ELF '
+    - regex: 'statically linked'
+tactics:
+  phase: "Binary Exploitation (static)"
+  priority: 55
+  next_step: "No libc to leak — build a ret2syscall chain from gadgets inside the binary itself."
+  tools:
+    - name: "ROPgadget syscalls"
+      binary: "ROPgadget"
+      command: "ROPgadget --binary {target} --only 'syscall|ret'"
+      purpose: "Locate syscall gadgets for ret2syscall."
+      install: "pipx install ropgadget"
+---
+id: pwn-setuid-binary
+name: "SUID / SGID Binary"
+target_type: binary
+author: official
+os_packages:
+  arch: [gdb, strace, ltrace]
+  debian: [gdb, strace, ltrace]
+  kali: [gdb, strace, ltrace]
+match:
+  logic: any
+  rules:
+    - regex: 'setuid|setgid|-rws|-r-s'
+tactics:
+  phase: "Privilege Escalation (SUID)"
+  priority: 60
+  next_step: "A SUID root binary is a privesc candidate — trace its calls for relative paths, env reliance, or injectable args."
+  tools:
+    - name: "strace"
+      binary: "strace"
+      command: "strace -f -e trace=execve,open,openat {target}"
+      purpose: "Watch for hijackable paths and environment reliance."
+    - name: "GTFOBins check"
+      binary: "curl"
+      command: "echo 'Check GTFOBins for the binary name: https://gtfobins.github.io/'"
+      purpose: "See if the binary has a known SUID escape technique."
 ---
 id: pwn-core-dump
-name: Core Dump Present
+name: "Core Dump Present"
 target_type: binary
 author: official
 os_packages:
@@ -123,14 +222,13 @@ os_packages:
 match:
   logic: any
   rules:
-    - regex: "ELF .*core file"
-    - contains: "core file"
+    - regex: 'ELF .*core file|core file'
 tactics:
   phase: "Crash Triage"
-  priority: 50
-  next_step: "Load the core dump to inspect the crash state, register values, and the faulting instruction."
+  priority: 48
+  next_step: "Open the core to inspect the crash state, registers, and the faulting instruction."
   tools:
-    - name: gdb core
-      binary: gdb
+    - name: "gdb core"
+      binary: "gdb"
       command: "gdb -q -c {target}"
-      purpose: "Open the core dump; use `bt`, `info registers`, and `x/i $pc`."
+      purpose: "Inspect with bt, info registers, x/i $pc."

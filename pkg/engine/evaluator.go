@@ -90,7 +90,7 @@ func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) To
 		Installed: installed,
 	}
 	if !installed {
-		tr.InstallCommand = e.installCommandFor(p, binary)
+		tr.InstallCommand = e.installCommandFor(p, t, binary)
 	}
 	return tr
 }
@@ -100,22 +100,27 @@ func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) To
 // an exact binary->package name match within the plugin's os_packages list;
 // failing that it offers the whole package set for the host family; failing
 // that it falls back to installing a package named after the binary.
-func (e *Evaluator) installCommandFor(p plugin.Plugin, binary string) string {
+func (e *Evaluator) installCommandFor(p plugin.Plugin, t plugin.Tool, binary string) string {
+	// 1. Prefer a native package whose name matches the binary exactly.
 	for _, key := range e.host.PackageKeys() {
-		pkgs, ok := p.OSPackages[key]
-		if !ok || len(pkgs) == 0 {
-			continue
-		}
-		// Prefer a package whose name matches the binary.
-		for _, pkg := range pkgs {
+		for _, pkg := range p.OSPackages[key] {
 			if strings.EqualFold(pkg, binary) {
 				return e.host.Manager.InstallCommand(pkg)
 			}
 		}
-		// Otherwise offer the full toolchain for this plugin/family.
-		return e.host.Manager.InstallCommand(pkgs...)
 	}
-	// Last resort: assume the package shares the binary's name.
+	// 2. A manager-agnostic install hint (pip/pipx/go/cargo/script) for tools
+	//    that are not distro-packaged beats guessing a package name.
+	if strings.TrimSpace(t.Install) != "" {
+		return strings.TrimSpace(t.Install)
+	}
+	// 3. Otherwise offer the full toolchain declared for this host family.
+	for _, key := range e.host.PackageKeys() {
+		if pkgs := p.OSPackages[key]; len(pkgs) > 0 {
+			return e.host.Manager.InstallCommand(pkgs...)
+		}
+	}
+	// 4. Last resort: assume the package shares the binary's name.
 	if binary != "" {
 		return e.host.Manager.InstallCommand(binary)
 	}

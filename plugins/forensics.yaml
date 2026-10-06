@@ -1,0 +1,155 @@
+# Digital forensics plugins — triggered by image/memory/pcap artifact context.
+---
+id: for-memory-dump
+name: "Memory Dump / RAM Image"
+target_type: forensics
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'memory dump|\.vmem|\.raw|\.lime|\.dmp|crashdump|physical memory'
+tactics:
+  phase: "Forensics (Memory)"
+  priority: 55
+  next_step: "Identify the profile, list processes and network connections, then hunt injected code and dump artifacts."
+  tools:
+    - name: "volatility3"
+      binary: "vol"
+      command: "vol -f {target} windows.pslist ; vol -f {target} windows.netscan"
+      purpose: "Process and network triage of the memory image."
+      install: "pipx install volatility3"
+    - name: "strings + grep"
+      binary: "strings"
+      command: "strings {target} | grep -Ei 'password|flag\\{|http://'"
+      purpose: "Quick-win secrets and URLs in RAM."
+---
+id: for-disk-image
+name: "Disk / Filesystem Image"
+target_type: forensics
+author: official
+os_packages:
+  arch: [sleuthkit, testdisk]
+  debian: [sleuthkit, testdisk]
+  kali: [sleuthkit, testdisk, autopsy]
+match:
+  logic: any
+  rules:
+    - regex: '\.(dd|e01|aff|img|raw)\b|DOS/MBR boot sector|filesystem data|partition table'
+tactics:
+  phase: "Forensics (Disk)"
+  priority: 50
+  next_step: "List partitions and the file timeline, then recover deleted files and carve unallocated space."
+  tools:
+    - name: "mmls + fls"
+      binary: "mmls"
+      command: "mmls {target} ; fls -r -o <offset> {target}"
+      purpose: "Map partitions and walk the filesystem (incl. deleted)."
+    - name: "testdisk"
+      binary: "testdisk"
+      command: "testdisk {target}"
+      purpose: "Recover lost partitions and files."
+---
+id: for-file-carving
+name: "Embedded Files / Carving Candidate"
+target_type: forensics
+author: official
+os_packages:
+  arch: [binwalk, foremost]
+  debian: [binwalk, foremost]
+  kali: [binwalk, foremost]
+match:
+  logic: any
+  rules:
+    - regex: 'gzip compressed|Zip archive|embedded|trailing data|data after|appended'
+tactics:
+  phase: "Forensics (Carving)"
+  priority: 45
+  next_step: "Extract embedded/appended files — containers often hide additional archives or images."
+  tools:
+    - name: "binwalk extract"
+      binary: "binwalk"
+      command: "binwalk -eM {target}"
+      purpose: "Recursively scan and extract embedded files."
+    - name: "foremost"
+      binary: "foremost"
+      command: "foremost -i {target} -o ./carved"
+      purpose: "Header/footer file carving."
+---
+id: for-pcap
+name: "Packet Capture (PCAP)"
+target_type: forensics
+author: official
+os_packages:
+  arch: [wireshark-cli, tcpdump]
+  debian: [tshark, tcpdump]
+  kali: [tshark, tcpdump, networkminer]
+match:
+  logic: any
+  rules:
+    - regex: '\.pcap(ng)?\b|tcpdump|capture file|Ethernet II|frame\.number'
+tactics:
+  phase: "Forensics (Network)"
+  priority: 48
+  next_step: "Pull the protocol hierarchy and conversations, then follow credential and file-transfer streams."
+  tools:
+    - name: "tshark triage"
+      binary: "tshark"
+      command: "tshark -r {target} -q -z io,phs ; tshark -r {target} -q -z conv,tcp"
+      purpose: "Protocol hierarchy and top conversations."
+    - name: "credential extract"
+      binary: "tshark"
+      command: "tshark -r {target} -Y 'http.authorization || ftp.request.command==USER || http.request.method==POST'"
+      purpose: "Surface cleartext credentials and POSTs."
+---
+id: for-exif-metadata
+name: "File Metadata / EXIF"
+target_type: forensics
+author: official
+os_packages:
+  arch: [perl-image-exiftool]
+  debian: [libimage-exiftool-perl]
+  kali: [libimage-exiftool-perl]
+match:
+  logic: any
+  rules:
+    - regex: 'EXIF|GPS (Latitude|Position)|Creator Tool|Author|Make\s*:|XMP|Producer'
+tactics:
+  phase: "Forensics (Metadata)"
+  priority: 35
+  next_step: "Metadata leaks authorship, software, timestamps, and GPS — extract all tags and geotags."
+  tools:
+    - name: "exiftool"
+      binary: "exiftool"
+      command: "exiftool -a -G1 {target}"
+      purpose: "Dump every metadata tag with groups."
+---
+id: for-windows-registry
+name: "Windows Registry Hive"
+target_type: forensics
+author: official
+os_packages:
+  arch: [python-pip]
+  debian: [python3-pip]
+  kali: [chntpw]
+match:
+  logic: any
+  rules:
+    - regex: 'regf|NTUSER\.DAT|SOFTWARE hive|SYSTEM hive|SAM hive|regedit|HKLM|HKEY_'
+tactics:
+  phase: "Forensics (Registry)"
+  priority: 44
+  next_step: "Parse the hives for autoruns, user activity, USB history, and (SAM+SYSTEM) local password hashes."
+  tools:
+    - name: "regripper"
+      binary: "rip.pl"
+      command: "rip.pl -r NTUSER.DAT -f ntuser"
+      purpose: "Extract forensic artifacts from a hive."
+    - name: "secretsdump local"
+      binary: "secretsdump.py"
+      command: "secretsdump.py -sam SAM -system SYSTEM LOCAL"
+      purpose: "Dump local hashes from SAM+SYSTEM."
+      install: "pipx install impacket"

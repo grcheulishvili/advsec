@@ -1,0 +1,104 @@
+# Mobile application plugins — triggered by `file` output and mobile artifacts.
+---
+id: mobile-apk
+name: "Android APK"
+target_type: mobile
+author: official
+os_packages:
+  arch: [jadx, apktool]
+  debian: [jadx, apktool]
+  kali: [jadx, apktool]
+match:
+  logic: any
+  rules:
+    - regex: 'Android application package|\.apk\b|AndroidManifest\.xml|classes\.dex|Zip archive.*apk'
+tactics:
+  phase: "Mobile (Android)"
+  priority: 50
+  next_step: "Decompile to review the manifest, permissions, and code; grep for secrets and insecure config."
+  tools:
+    - name: "jadx"
+      binary: "jadx"
+      command: "jadx -d ./out {target}"
+      purpose: "Decompile DEX to readable Java."
+    - name: "apktool"
+      binary: "apktool"
+      command: "apktool d {target} -o ./apk-src"
+      purpose: "Decode resources and smali for manifest review."
+    - name: "mobsf"
+      binary: "mobsf"
+      command: "# run MobSF and upload the APK for a full static scan"
+      purpose: "Automated static analysis report."
+      install: "pipx install mobsfscan"
+---
+id: mobile-dex
+name: "Dalvik DEX Bytecode"
+target_type: mobile
+author: official
+os_packages:
+  arch: [jadx]
+  debian: [jadx]
+  kali: [jadx]
+match:
+  logic: any
+  rules:
+    - regex: 'Dalvik dex file|\.dex\b|dex\n0'
+tactics:
+  phase: "Mobile (Android)"
+  priority: 45
+  next_step: "Decompile the DEX directly and review for hardcoded keys, endpoints, and crypto misuse."
+  tools:
+    - name: "jadx dex"
+      binary: "jadx"
+      command: "jadx -d ./out {target}"
+      purpose: "Decompile standalone DEX."
+---
+id: mobile-ios
+name: "iOS App / Mach-O (ARM)"
+target_type: mobile
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: '\.ipa\b|Payload/|Info\.plist|Mach-O.*arm64|embedded\.mobileprovision'
+tactics:
+  phase: "Mobile (iOS)"
+  priority: 45
+  next_step: "Unzip the IPA, review the Info.plist and entitlements, then analyze the Mach-O for secrets and weak APIs."
+  tools:
+    - name: "plist + strings"
+      binary: "unzip"
+      command: "unzip -o {target} -d ipa && find ipa -name 'Info.plist' -exec plistutil -i {} \\;"
+      purpose: "Extract and read the app's Info.plist."
+    - name: "frida (dynamic)"
+      binary: "frida"
+      command: "frida-ps -U"
+      purpose: "Instrument the running app on a jailbroken device."
+      install: "pipx install frida-tools"
+---
+id: mobile-frida-dynamic
+name: "Dynamic Instrumentation Context"
+target_type: mobile
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'frida|objection|SSL pinning|root detection|jailbreak detection'
+tactics:
+  phase: "Mobile (Dynamic)"
+  priority: 40
+  next_step: "Hook the app to bypass root/jailbreak and SSL pinning, then observe its traffic and sensitive calls."
+  tools:
+    - name: "objection"
+      binary: "objection"
+      command: "objection -g <package> explore"
+      purpose: "Runtime exploration, pinning and root-detection bypass."
+      install: "pipx install objection"

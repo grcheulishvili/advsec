@@ -1,0 +1,156 @@
+# Cloud / container plugins — triggered by cloud CLI output, k8s/docker
+# artifacts, and IaC/config context.
+---
+id: cloud-docker
+name: "Docker Environment"
+target_type: cloud
+author: official
+os_packages:
+  arch: [docker]
+  debian: [docker.io]
+  kali: [docker.io]
+match:
+  logic: any
+  rules:
+    - regex: 'Docker version|CONTAINER ID|docker\.sock|FROM .*:|/var/run/docker\.sock|image.*latest'
+tactics:
+  phase: "Cloud / Container Assessment"
+  priority: 45
+  next_step: "Check for a mounted docker.sock or privileged containers — both are direct host-escape paths."
+  tools:
+    - name: "socket escape check"
+      binary: "docker"
+      command: "ls -la /var/run/docker.sock 2>/dev/null ; docker ps"
+      purpose: "Detect a writable docker socket (= root on host)."
+    - name: "image secrets"
+      binary: "trufflehog"
+      command: "trufflehog docker --image <image>"
+      purpose: "Scan an image's layers for secrets."
+      install: "pipx install trufflehog"
+---
+id: cloud-k8s
+name: "Kubernetes Cluster"
+target_type: cloud
+author: official
+os_packages:
+  arch: [kubectl]
+  debian: [kubectl]
+  kali: [kubectl]
+match:
+  logic: any
+  rules:
+    - regex: 'kubectl|kube-system|apiVersion:|kubelet|serviceaccount|/var/run/secrets/kubernetes'
+tactics:
+  phase: "Cloud / Container Assessment (K8s)"
+  priority: 55
+  next_step: "Enumerate your permissions, then look for exposed kubelet, secrets, and pod-to-node escape routes."
+  tools:
+    - name: "can-i --list"
+      binary: "kubectl"
+      command: "kubectl auth can-i --list ; kubectl get secrets -A"
+      purpose: "Map RBAC rights and reachable secrets."
+    - name: "kub-hunter"
+      binary: "kube-hunter"
+      command: "kube-hunter --remote {target_ip}"
+      purpose: "Hunt for known Kubernetes weaknesses."
+      install: "pipx install kube-hunter"
+---
+id: cloud-aws
+name: "AWS Credentials / Environment"
+target_type: cloud
+author: official
+os_packages:
+  arch: [aws-cli]
+  debian: [awscli]
+  kali: [awscli]
+match:
+  logic: any
+  rules:
+    - regex: 'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|aws_access_key_id|arn:aws:|s3://|\.amazonaws\.com'
+tactics:
+  phase: "Cloud Assessment (AWS)"
+  priority: 60
+  next_step: "Identify the principal, enumerate its permissions, then map privilege-escalation paths across services."
+  tools:
+    - name: "sts whoami"
+      binary: "aws"
+      command: "aws sts get-caller-identity"
+      purpose: "Confirm the identity behind the credentials."
+    - name: "enumerate-iam"
+      binary: "enumerate-iam"
+      command: "enumerate-iam --access-key <AK> --secret-key <SK>"
+      purpose: "Brute the principal's effective permissions."
+      install: "git clone https://github.com/andresriancho/enumerate-iam"
+    - name: "pacu"
+      binary: "pacu"
+      command: "pacu"
+      purpose: "AWS exploitation framework (privesc modules)."
+      install: "pipx install pacu"
+---
+id: cloud-s3-bucket
+name: "S3 / Object Storage Bucket"
+target_type: cloud
+author: official
+os_packages:
+  arch: [aws-cli]
+  debian: [awscli]
+  kali: [awscli]
+match:
+  logic: any
+  rules:
+    - regex: 's3://|\.s3\.amazonaws\.com|s3\.[a-z0-9-]+\.amazonaws|storage\.googleapis\.com|\.blob\.core\.windows\.net'
+tactics:
+  phase: "Cloud Assessment (Storage)"
+  priority: 58
+  next_step: "Test for public list/read/write — misconfigured buckets leak data or allow content injection."
+  tools:
+    - name: "s3 anon list"
+      binary: "aws"
+      command: "aws s3 ls s3://<bucket> --no-sign-request"
+      purpose: "Check for unauthenticated bucket listing."
+---
+id: cloud-azure-gcp
+name: "Azure / GCP Context"
+target_type: cloud
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'azure|\.microsoftonline\.com|gcloud|\.googleapis\.com|service_account\.json|AZURE_CLIENT'
+tactics:
+  phase: "Cloud Assessment (Azure/GCP)"
+  priority: 52
+  next_step: "Authenticate with the found context and enumerate roles/resources for over-permissioned identities."
+  tools:
+    - name: "ScoutSuite"
+      binary: "scout"
+      command: "scout {aws|gcp|azure}"
+      purpose: "Multi-cloud security posture audit."
+      install: "pipx install scoutsuite"
+---
+id: cloud-terraform-state
+name: "Terraform / IaC Artifact"
+target_type: cloud
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'terraform|\.tfstate|resource "aws_|provider "|HCL'
+tactics:
+  phase: "Cloud Assessment (IaC)"
+  priority: 40
+  next_step: "State files often hold plaintext secrets; scan the IaC for insecure defaults before it ships."
+  tools:
+    - name: "tfsec / trivy config"
+      binary: "trivy"
+      command: "trivy config ."
+      purpose: "Static analysis of IaC for misconfigurations."
+      install: "go install github.com/aquasecurity/trivy@latest"

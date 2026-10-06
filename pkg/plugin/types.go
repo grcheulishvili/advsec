@@ -73,4 +73,10 @@ type Tool struct {
 	Command string `yaml:"command"`
 	// Purpose explains what the tool achieves.
 	Purpose string `yaml:"purpose"`
+	// Install is an optional manager-agnostic install command used when the
+	// tool is not found in PATH and no native package mapping resolves it
+	// (e.g. "pipx install impacket", "go install ...@latest"). It is a
+	// fallback preferred over guessing a distro package name for tools that
+	// ship only via pip/pipx/go/cargo or a vendor script.
+	Install string `yaml:"install"`
 }

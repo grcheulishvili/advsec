@@ -127,6 +127,30 @@ func TestEvaluatorExpandsAndRecommendsInstall(t *testing.T) {
 	}
 }
 
+func TestEvaluatorUsesInstallHintWhenNoPackage(t *testing.T) {
+	host := osdetect.HostInfo{Family: osdetect.FamilyDebian, Manager: debianManager()}
+	p := plugin.Plugin{
+		ID:   "t-pipx",
+		Name: "pip tool",
+		Match: plugin.Match{Logic: "any", Rules: []plugin.Rule{{Contains: "impacket"}}},
+		Tactics: plugin.Tactics{
+			Phase: "AD", NextStep: "relay",
+			Tools: []plugin.Tool{{
+				Name: "ntlmrelayx", Binary: "ntlmrelayx.py",
+				Command: "ntlmrelayx.py -t {target_ip}",
+				Install: "pipx install impacket",
+			}},
+		},
+	}
+	ctx := ParseString("found impacket usage against 10.0.0.1")
+	matches := NewMatcher([]plugin.Plugin{p}).Evaluate(ctx)
+	rep := NewEvaluator(host).Evaluate(ctx, matches)
+	tool := rep.Recommendations[0].Tools[0]
+	if !tool.Installed && tool.InstallCommand != "pipx install impacket" {
+		t.Fatalf("install hint not used: %q", tool.InstallCommand)
+	}
+}
+
 // debianManager mirrors the internal apt manager for test isolation.
 func debianManager() osdetect.PackageManager {
 	return osdetect.PackageManager{

@@ -1,0 +1,160 @@
+# Reconnaissance / OSINT plugins — triggered by target handoffs (a bare
+# domain, IP range, or email) and discovery-tool output.
+---
+id: recon-domain-target
+name: "Domain Target (Attack Surface Mapping)"
+target_type: recon
+author: official
+os_packages:
+  arch: [whois]
+  debian: [whois]
+  kali: [whois, amass]
+match:
+  logic: any
+  rules:
+    - entity_type: domain
+tactics:
+  phase: "External Reconnaissance"
+  priority: 15
+  next_step: "Map the attack surface: subdomains from passive sources, then resolve and probe live hosts."
+  tools:
+    - name: "subfinder"
+      binary: "subfinder"
+      command: "subfinder -d {target_domain} -all -silent"
+      purpose: "Passive subdomain enumeration across many sources."
+      install: "go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+    - name: "amass"
+      binary: "amass"
+      command: "amass enum -passive -d {target_domain}"
+      purpose: "In-depth passive asset discovery."
+    - name: "httpx probe"
+      binary: "httpx"
+      command: "subfinder -d {target_domain} -silent | httpx -title -tech-detect -status-code"
+      purpose: "Probe discovered hosts for live web services."
+      install: "go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
+---
+id: recon-dns-records
+name: "DNS Enumeration"
+target_type: recon
+author: official
+os_packages:
+  arch: [bind]
+  debian: [dnsutils]
+  kali: [dnsutils, dnsrecon]
+match:
+  logic: any
+  rules:
+    - entity_type: domain
+    - regex: 'NS record|A record|MX record|CNAME|TXT'
+tactics:
+  phase: "External Reconnaissance (DNS)"
+  priority: 12
+  next_step: "Pull all record types, attempt AXFR, then brute-force hostnames for non-public assets."
+  tools:
+    - name: "dnsrecon"
+      binary: "dnsrecon"
+      command: "dnsrecon -d {target_domain} -a"
+      purpose: "Standard + AXFR + record enumeration."
+    - name: "dnsx bruteforce"
+      binary: "dnsx"
+      command: "dnsx -d {target_domain} -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+      purpose: "Active subdomain brute force."
+      install: "go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest"
+---
+id: recon-cert-transparency
+name: "Certificate / TLS Host"
+target_type: recon
+author: official
+os_packages:
+  arch: [openssl, jq]
+  debian: [openssl, jq]
+  kali: [openssl, jq]
+match:
+  logic: any
+  rules:
+    - regex: 'subject=|issuer=|Subject Alternative Name|-----BEGIN CERTIFICATE|notAfter'
+tactics:
+  phase: "External Reconnaissance (CT)"
+  priority: 18
+  next_step: "SANs and CT logs reveal sibling hostnames and internal names — mine them for more surface."
+  tools:
+    - name: "crt.sh"
+      binary: "curl"
+      command: "curl -s 'https://crt.sh/?q=%25.{target_domain}&output=json' | jq -r '.[].name_value' | sort -u"
+      purpose: "Pull hostnames from Certificate Transparency logs."
+    - name: "tlsx"
+      binary: "tlsx"
+      command: "tlsx -u {target_domain} -san -cn -silent"
+      purpose: "Extract SAN/CN from the live certificate."
+      install: "go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest"
+---
+id: recon-ip-range
+name: "IP / CIDR Range Sweep"
+target_type: recon
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap, masscan]
+match:
+  logic: any
+  rules:
+    - regex: '\b\d{1,3}(\.\d{1,3}){3}/\d{1,2}\b'
+tactics:
+  phase: "External Reconnaissance (sweep)"
+  priority: 16
+  next_step: "Fast-scan the range for live hosts and common ports, then hand findings to a service scan."
+  tools:
+    - name: "masscan"
+      binary: "masscan"
+      command: "masscan <cidr> -p1-65535 --rate 10000"
+      purpose: "Internet-speed port sweep across the range."
+    - name: "naabu"
+      binary: "naabu"
+      command: "naabu -host <cidr> -top-ports 1000 -silent"
+      purpose: "Fast SYN port discovery."
+      install: "go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
+---
+id: recon-email-user
+name: "Email / Username Discovery"
+target_type: recon
+author: official
+os_packages:
+  arch: [theharvester]
+  debian: [theharvester]
+  kali: [theharvester]
+match:
+  logic: any
+  rules:
+    - entity_type: email
+tactics:
+  phase: "External Reconnaissance (OSINT)"
+  priority: 14
+  next_step: "Derive the username scheme and gather more addresses for password spraying and phishing lists."
+  tools:
+    - name: "theHarvester"
+      binary: "theHarvester"
+      command: "theHarvester -d {target_domain} -b all"
+      purpose: "Collect emails, hosts, and employees from OSINT sources."
+---
+id: recon-vhost
+name: "Virtual Host Discovery"
+target_type: recon
+author: official
+os_packages:
+  arch: [ffuf]
+  debian: [ffuf]
+  kali: [ffuf, gobuster]
+match:
+  logic: any
+  rules:
+    - regex: 'Host header|vhost|name-based virtual host|default backend'
+tactics:
+  phase: "External Reconnaissance (vhost)"
+  priority: 20
+  next_step: "One IP often hosts many sites — fuzz the Host header to reveal hidden virtual hosts."
+  tools:
+    - name: "ffuf vhost"
+      binary: "ffuf"
+      command: "ffuf -u http://{target_ip} -H 'Host: FUZZ.{target_domain}' -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-20000.txt -fs 0"
+      purpose: "Brute-force name-based virtual hosts."

@@ -1,0 +1,209 @@
+# Blue team / detection / threat-hunting plugins — triggered by log lines,
+# IDS/EDR alerts, and IOC material.
+---
+id: bt-ioc-hash
+name: "IOC Hash (Reputation Triage)"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [yara]
+  debian: [yara]
+  kali: [yara]
+match:
+  logic: any
+  rules:
+    - entity_type: hash
+tactics:
+  phase: "Threat Hunting (IOC)"
+  priority: 30
+  next_step: "Check the hash against threat intel, then sweep the fleet for the same file and related artifacts."
+  tools:
+    - name: "yara sweep"
+      binary: "yara"
+      command: "yara -r /usr/share/yara-rules/ /path/to/scan"
+      purpose: "Signature-scan hosts/files for the sample family."
+    - name: "vt lookup"
+      binary: "vt"
+      command: "vt file {target_hash}"
+      purpose: "VirusTotal reputation (needs API key)."
+      install: "go install github.com/VirusTotal/vt-cli/vt@latest"
+---
+id: bt-ioc-ip-domain
+name: "Network IOC (IP / Domain)"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [bind, whois]
+  debian: [dnsutils, whois]
+  kali: [dnsutils, whois]
+match:
+  logic: any
+  rules:
+    - regex: 'C2|callback|beacon|malicious|suspicious connection|exfil'
+tactics:
+  phase: "Threat Hunting (Network IOC)"
+  priority: 32
+  next_step: "Enrich the indicator (ASN/geo/passive DNS), then pivot across flow logs for other talkers."
+  tools:
+    - name: "whois + dig"
+      binary: "whois"
+      command: "whois {target_ip} ; dig +short -x {target_ip}"
+      purpose: "Attribute the indicator (owner, PTR)."
+---
+id: bt-bruteforce-detect
+name: "Authentication Brute Force in Logs"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [fail2ban]
+  debian: [fail2ban]
+  kali: [fail2ban]
+match:
+  logic: any
+  rules:
+    - regex: 'Failed password for|authentication failure|Invalid user|repeated login failures'
+tactics:
+  phase: "Detection (Access)"
+  priority: 55
+  next_step: "Correlate source IPs and accounts, confirm whether any attempt succeeded, then block the source."
+  tools:
+    - name: "top offenders"
+      binary: "journalctl"
+      command: "journalctl -u ssh --since '-24h' | grep -i failed | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+' | sort | uniq -c | sort -rn | head"
+      purpose: "Rank attacking source IPs by attempt count."
+    - name: "fail2ban ban"
+      binary: "fail2ban-client"
+      command: "fail2ban-client set sshd banip {target_ip}"
+      purpose: "Block the offending source."
+---
+id: bt-webshell
+name: "Possible Web Shell / RCE in Access Log"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [ripgrep]
+  debian: [ripgrep]
+  kali: [ripgrep]
+match:
+  logic: any
+  rules:
+    - regex: 'cmd=|c99|r57|eval\(|base64_decode|/shell\.php|wget .*;chmod|whoami'
+tactics:
+  phase: "Detection (Web Compromise)"
+  priority: 60
+  next_step: "Hunt the webroot for recently modified scripts and suspicious one-liners, then preserve and scope."
+  tools:
+    - name: "recent webroot files"
+      binary: "find"
+      command: "find /var/www -type f -name '*.php' -mtime -7 -printf '%T+ %p\\n' | sort"
+      purpose: "Surface recently changed scripts in the webroot."
+    - name: "yara webshell"
+      binary: "yara"
+      command: "yara -r /usr/share/yara-rules/webshells/ /var/www"
+      purpose: "Signature-scan for known web shells."
+---
+id: bt-persistence
+name: "Persistence Mechanism Indicator"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [audit]
+  debian: [auditd]
+  kali: [auditd]
+match:
+  logic: any
+  rules:
+    - regex: 'crontab|systemd.*\.service|rc\.local|\.bashrc|authorized_keys|ld\.so\.preload|/etc/init'
+tactics:
+  phase: "Detection (Persistence)"
+  priority: 50
+  next_step: "Audit autostart surfaces (cron, systemd units, shell profiles, SSH keys) for attacker-added entries."
+  tools:
+    - name: "list timers/units"
+      binary: "systemctl"
+      command: "systemctl list-timers --all ; systemctl list-unit-files --state=enabled"
+      purpose: "Review scheduled and enabled units."
+    - name: "cron audit"
+      binary: "cat"
+      command: "for u in $(cut -f1 -d: /etc/passwd); do crontab -l -u $u 2>/dev/null; done; ls -la /etc/cron.*"
+      purpose: "Enumerate all users' cron entries."
+---
+id: bt-privesc-audit
+name: "Privilege Escalation / Root Activity"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [audit]
+  debian: [auditd]
+  kali: [auditd]
+match:
+  logic: any
+  rules:
+    - regex: 'sudo:.*COMMAND=|session opened for user root|pam_unix\(sudo:session\)|COMMAND=/bin/(ba)?sh'
+tactics:
+  phase: "Detection (Privilege)"
+  priority: 48
+  next_step: "Review who escalated to root and what ran; flag anything outside change windows or from service accounts."
+  tools:
+    - name: "sudo history"
+      binary: "journalctl"
+      command: "journalctl _COMM=sudo --since '-24h'"
+      purpose: "Review sudo invocations."
+    - name: "ausearch"
+      binary: "ausearch"
+      command: "ausearch -m USER_CMD --start recent"
+      purpose: "Pull executed commands from the audit log."
+---
+id: bt-ids-alert
+name: "IDS / IPS Alert (Suricata / Snort)"
+target_type: blueteam
+author: official
+os_packages:
+  arch: [suricata]
+  debian: [suricata]
+  kali: [suricata]
+match:
+  logic: any
+  rules:
+    - regex: '\[\*\*\]|Classification:|Priority: [0-9]|ET (TROJAN|EXPLOIT|SCAN|MALWARE)|gid:1'
+tactics:
+  phase: "Detection (Network IDS)"
+  priority: 52
+  next_step: "Validate the alert against the raw flow, confirm it is not a false positive, then scope affected hosts."
+  tools:
+    - name: "zeek pcap"
+      binary: "zeek"
+      command: "zeek -r capture.pcap"
+      purpose: "Generate rich protocol logs from the capture for triage."
+    - name: "suricata replay"
+      binary: "suricata"
+      command: "suricata -r capture.pcap -l ./out"
+      purpose: "Re-run rules against the stored capture."
+---
+id: bt-sigma-hunt
+name: "Windows Event / Sysmon Log"
+target_type: blueteam
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'EventID|Sysmon|4624|4625|4688|7045|Microsoft-Windows-Security-Auditing|ParentImage'
+tactics:
+  phase: "Detection (Endpoint)"
+  priority: 46
+  next_step: "Run Sigma detections over the events and pivot on process-ancestry and logon anomalies."
+  tools:
+    - name: "chainsaw"
+      binary: "chainsaw"
+      command: "chainsaw hunt ./EVTX -s /path/to/sigma --mapping mappings/sigma-event-logs-all.yml"
+      purpose: "Sigma-based hunting over EVTX."
+      install: "cargo install chainsaw  # or download release"
+    - name: "sigma cli"
+      binary: "sigma"
+      command: "sigma convert -t splunk rules/"
+      purpose: "Convert Sigma rules to your SIEM query language."
+      install: "pipx install sigma-cli"

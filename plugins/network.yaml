@@ -1,114 +1,7 @@
-# Network service plugins.
-# Triggered by nmap -sV / banner output for common services.
----
-id: net-ssh-service
-name: SSH Service
-target_type: network
-author: official
-os_packages:
-  arch: [hydra, nmap]
-  debian: [hydra, nmap]
-  kali: [hydra, nmap]
-match:
-  logic: any
-  rules:
-    - regex: "\\b22/tcp\\b.*ssh"
-    - regex: "SSH-[0-9.]+-OpenSSH"
-tactics:
-  phase: "Network Service Enumeration"
-  priority: 40
-  next_step: "Grab the exact version for known CVEs, enumerate auth methods, and only then consider credential attacks."
-  tools:
-    - name: nmap ssh scripts
-      binary: nmap
-      command: "nmap -p22 --script ssh2-enum-algos,ssh-auth-methods {target_ip}"
-      purpose: "Enumerate supported algorithms and authentication methods."
-    - name: hydra
-      binary: hydra
-      command: "hydra -L users.txt -P passwords.txt ssh://{target_ip}"
-      purpose: "Credential brute force (only with authorization)."
----
-id: net-smb-service
-name: SMB / NetBIOS Service
-target_type: network
-author: official
-os_packages:
-  arch: [smbclient, enum4linux-ng, nmap]
-  debian: [smbclient, enum4linux, nmap]
-  kali: [smbclient, enum4linux-ng, nmap]
-match:
-  logic: any
-  rules:
-    - regex: "\\b(139|445)/tcp\\b"
-    - regex: "microsoft-ds|netbios-ssn"
-tactics:
-  phase: "Network Service Enumeration (SMB)"
-  priority: 65
-  next_step: "Enumerate shares, users, and OS info; check for null sessions and EternalBlue-class exposure."
-  tools:
-    - name: enum4linux-ng
-      binary: enum4linux-ng
-      command: "enum4linux-ng -A {target_ip}"
-      purpose: "Full SMB/RPC enumeration (shares, users, groups, policy)."
-    - name: nmap smb-vuln
-      binary: nmap
-      command: "nmap -p445 --script smb-vuln* {target_ip}"
-      purpose: "Check for known SMB vulnerabilities (MS17-010, etc.)."
-    - name: smbclient
-      binary: smbclient
-      command: "smbclient -L //{target_ip}/ -N"
-      purpose: "List shares with a null session."
----
-id: net-ftp-service
-name: FTP Service
-target_type: network
-author: official
-os_packages:
-  arch: [nmap]
-  debian: [nmap]
-  kali: [nmap]
-match:
-  logic: any
-  rules:
-    - regex: "\\b21/tcp\\b.*ftp"
-    - regex: "220 .*FTP"
-tactics:
-  phase: "Network Service Enumeration (FTP)"
-  priority: 35
-  next_step: "Test anonymous login first; it is a common and high-value misconfiguration."
-  tools:
-    - name: nmap ftp scripts
-      binary: nmap
-      command: "nmap -p21 --script ftp-anon,ftp-syst {target_ip}"
-      purpose: "Check anonymous access and grab server details."
----
-id: net-database-service
-name: Exposed Database Service
-target_type: network
-author: official
-os_packages:
-  arch: [nmap]
-  debian: [nmap]
-  kali: [nmap]
-match:
-  logic: any
-  rules:
-    - regex: "\\b3306/tcp\\b.*mysql"
-    - regex: "\\b5432/tcp\\b.*postgres"
-    - regex: "\\b27017/tcp\\b.*mongodb"
-    - regex: "\\b6379/tcp\\b.*redis"
-tactics:
-  phase: "Data Store Exposure"
-  priority: 75
-  next_step: "An internet-facing database is high severity - test for default/empty credentials and unauthenticated access immediately."
-  tools:
-    - name: nmap db scripts
-      binary: nmap
-      command: "nmap -sV --script '*-info,*-empty-password' -p {target_port} {target_ip}"
-      purpose: "Fingerprint the database and check for unauthenticated access."
+# Network service plugins — triggered by nmap -sV / banner output.
 ---
 id: net-nmap-generic
-name: Open Ports Detected (Generic)
+name: "Open Ports Detected (Generic)"
 target_type: network
 author: official
 os_packages:
@@ -118,14 +11,380 @@ os_packages:
 match:
   logic: all
   rules:
-    - regex: "\\b\\d{1,5}/tcp\\b"
+    - regex: '\b\d{1,5}/tcp\b'
     - contains: "open"
 tactics:
   phase: "Network Enumeration"
   priority: 10
-  next_step: "Run a focused service/version and default-script scan against the discovered open ports."
+  next_step: "Run a focused service/version and default-script scan on the discovered ports."
   tools:
-    - name: nmap deep scan
-      binary: nmap
+    - name: "nmap deep scan"
+      binary: "nmap"
       command: "nmap -sVC -p {target_port} {target_ip}"
-      purpose: "Service/version detection plus default NSE scripts on open ports."
+      purpose: "Version detection plus default NSE scripts."
+---
+id: net-ssh
+name: "SSH Service"
+target_type: network
+author: official
+os_packages:
+  arch: [hydra, nmap]
+  debian: [hydra, nmap]
+  kali: [hydra, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b22/tcp\b.*ssh'
+    - regex: 'SSH-[0-9.]+-OpenSSH'
+tactics:
+  phase: "Network Service Enumeration (SSH)"
+  priority: 35
+  next_step: "Grab the version for CVEs, enumerate auth methods, then consider credentialed/key access."
+  tools:
+    - name: "nmap ssh"
+      binary: "nmap"
+      command: "nmap -p22 --script ssh2-enum-algos,ssh-auth-methods,ssh-hostkey {target_ip}"
+      purpose: "Enumerate algorithms and auth methods."
+    - name: "hydra ssh"
+      binary: "hydra"
+      command: "hydra -L users.txt -P /usr/share/wordlists/rockyou.txt ssh://{target_ip}"
+      purpose: "Credential brute force (with authorization)."
+---
+id: net-smb
+name: "SMB / NetBIOS Service"
+target_type: network
+author: official
+os_packages:
+  arch: [smbclient, nmap]
+  debian: [smbclient, nmap]
+  kali: [smbclient, enum4linux-ng, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b(139|445)/tcp\b'
+    - regex: 'microsoft-ds|netbios-ssn'
+tactics:
+  phase: "Network Service Enumeration (SMB)"
+  priority: 65
+  next_step: "Enumerate shares/users/policy, test null sessions, and check for EternalBlue-class exposure."
+  tools:
+    - name: "nxc smb"
+      binary: "nxc"
+      command: "nxc smb {target_ip} -u '' -p '' --shares"
+      purpose: "NetExec share/user enumeration and null-session test."
+      install: "pipx install netexec"
+    - name: "enum4linux-ng"
+      binary: "enum4linux-ng"
+      command: "enum4linux-ng -A {target_ip}"
+      purpose: "Full SMB/RPC enumeration."
+      install: "pipx install enum4linux-ng"
+    - name: "nmap smb-vuln"
+      binary: "nmap"
+      command: "nmap -p445 --script smb-vuln* {target_ip}"
+      purpose: "Check MS17-010 and related SMB vulns."
+---
+id: net-rdp
+name: "RDP Service"
+target_type: network
+author: official
+os_packages:
+  arch: [freerdp, nmap]
+  debian: [freerdp2-x11, nmap]
+  kali: [freerdp2-x11, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b3389/tcp\b|ms-wbt-server|Remote Desktop'
+tactics:
+  phase: "Network Service Enumeration (RDP)"
+  priority: 55
+  next_step: "Check NLA and cert for host info, test BlueKeep exposure, then spray known credentials."
+  tools:
+    - name: "nmap rdp"
+      binary: "nmap"
+      command: "nmap -p3389 --script rdp-ntlm-info,rdp-vuln-ms12-020 {target_ip}"
+      purpose: "Pull host info and check RDP vulns."
+    - name: "nxc rdp"
+      binary: "nxc"
+      command: "nxc rdp {target_ip} -u users.txt -p passwords.txt"
+      purpose: "Spray credentials over RDP."
+      install: "pipx install netexec"
+---
+id: net-ldap
+name: "LDAP / Directory Service"
+target_type: network
+author: official
+os_packages:
+  arch: [openldap, nmap]
+  debian: [ldap-utils, nmap]
+  kali: [ldap-utils, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b389/tcp\b|\b636/tcp\b|\b3268/tcp\b|ldap|Active Directory LDAP'
+tactics:
+  phase: "Network Service Enumeration (LDAP)"
+  priority: 60
+  next_step: "Query the naming contexts anonymously, then dump users/groups and look for creds in descriptions."
+  tools:
+    - name: "ldapsearch anon"
+      binary: "ldapsearch"
+      command: "ldapsearch -x -H ldap://{target_ip} -s base namingContexts"
+      purpose: "Discover base DN via anonymous bind."
+    - name: "nmap ldap"
+      binary: "nmap"
+      command: "nmap -p389 --script ldap-rootdse,ldap-search {target_ip}"
+      purpose: "Enumerate the directory over LDAP."
+---
+id: net-kerberos
+name: "Kerberos (Active Directory)"
+target_type: network
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: '\b88/tcp\b|kerberos-sec|krb5'
+tactics:
+  phase: "Active Directory Enumeration"
+  priority: 70
+  next_step: "Kerberos on 88 confirms a DC — enumerate valid users, then AS-REP roast and Kerberoast."
+  tools:
+    - name: "kerbrute userenum"
+      binary: "kerbrute"
+      command: "kerbrute userenum -d <domain> --dc {target_ip} users.txt"
+      purpose: "Validate usernames without lockouts."
+      install: "go install github.com/ropnop/kerbrute@latest"
+    - name: "GetNPUsers (AS-REP)"
+      binary: "GetNPUsers.py"
+      command: "GetNPUsers.py <domain>/ -dc-ip {target_ip} -usersfile users.txt -no-pass"
+      purpose: "Harvest AS-REP roastable hashes."
+      install: "pipx install impacket"
+---
+id: net-snmp
+name: "SNMP Service"
+target_type: network
+author: official
+os_packages:
+  arch: [net-snmp, nmap]
+  debian: [snmp, nmap]
+  kali: [snmp, onesixtyone, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b161/udp\b|snmp'
+tactics:
+  phase: "Network Service Enumeration (SNMP)"
+  priority: 50
+  next_step: "Guess the community string, then walk the MIB for users, processes, routes, and ARP tables."
+  tools:
+    - name: "onesixtyone"
+      binary: "onesixtyone"
+      command: "onesixtyone -c /usr/share/seclists/Discovery/SNMP/common-snmp-community-strings.txt {target_ip}"
+      purpose: "Brute-force the SNMP community string."
+    - name: "snmpwalk"
+      binary: "snmpwalk"
+      command: "snmpwalk -v2c -c public {target_ip}"
+      purpose: "Walk the full MIB tree."
+---
+id: net-smtp
+name: "SMTP Mail Service"
+target_type: network
+author: official
+os_packages:
+  arch: [smtp-user-enum, nmap]
+  debian: [smtp-user-enum, nmap]
+  kali: [smtp-user-enum, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b(25|465|587)/tcp\b|smtp|220 .*ESMTP'
+tactics:
+  phase: "Network Service Enumeration (SMTP)"
+  priority: 40
+  next_step: "Enumerate valid users with VRFY/EXPN/RCPT and check for open relay."
+  tools:
+    - name: "smtp-user-enum"
+      binary: "smtp-user-enum"
+      command: "smtp-user-enum -M RCPT -U users.txt -t {target_ip}"
+      purpose: "Validate mailbox users."
+    - name: "nmap smtp"
+      binary: "nmap"
+      command: "nmap -p25 --script smtp-commands,smtp-open-relay {target_ip}"
+      purpose: "List commands and test open relay."
+---
+id: net-dns
+name: "DNS Service"
+target_type: network
+author: official
+os_packages:
+  arch: [bind, nmap]
+  debian: [dnsutils, nmap]
+  kali: [dnsutils, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b53/(tcp|udp)\b|domain|DNS'
+tactics:
+  phase: "Network Service Enumeration (DNS)"
+  priority: 45
+  next_step: "Attempt a zone transfer, then enumerate records and look for internal naming."
+  tools:
+    - name: "zone transfer"
+      binary: "dig"
+      command: "dig axfr @{target_ip} <domain>"
+      purpose: "Attempt a full AXFR zone transfer."
+    - name: "nmap dns"
+      binary: "nmap"
+      command: "nmap -p53 --script dns-zone-transfer,dns-nsid {target_ip}"
+      purpose: "Probe DNS server configuration."
+---
+id: net-nfs
+name: "NFS / RPC Service"
+target_type: network
+author: official
+os_packages:
+  arch: [nfs-utils, nmap]
+  debian: [nfs-common, nmap]
+  kali: [nfs-common, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b(111|2049)/tcp\b|rpcbind|nfs_acl|mountd'
+tactics:
+  phase: "Network Service Enumeration (NFS)"
+  priority: 52
+  next_step: "List exports — world-readable shares and no_root_squash are direct paths to data and privesc."
+  tools:
+    - name: "showmount"
+      binary: "showmount"
+      command: "showmount -e {target_ip}"
+      purpose: "List exported NFS shares."
+    - name: "nmap rpc"
+      binary: "nmap"
+      command: "nmap -p111 --script nfs-ls,nfs-showmount,rpcinfo {target_ip}"
+      purpose: "Enumerate RPC and NFS exports."
+---
+id: net-database-exposed
+name: "Exposed Database Service"
+target_type: network
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b3306/tcp\b.*mysql|\b5432/tcp\b.*postgres|\b1433/tcp\b.*ms-sql|\b1521/tcp\b.*oracle'
+    - regex: '\b27017/tcp\b.*mongo|\b6379/tcp\b.*redis|\b9200/tcp\b.*elastic|\b11211/tcp\b.*memcache'
+tactics:
+  phase: "Data Store Exposure"
+  priority: 75
+  next_step: "An internet-facing database is high severity — test default/empty creds and unauthenticated access now."
+  tools:
+    - name: "nmap db"
+      binary: "nmap"
+      command: "nmap -sV --script '*-info,*-empty-password,*-brute' -p {target_port} {target_ip}"
+      purpose: "Fingerprint and test unauthenticated access."
+    - name: "redis-cli"
+      binary: "redis-cli"
+      command: "redis-cli -h {target_ip} info"
+      purpose: "Check for unauthenticated Redis (RCE via module/cron)."
+---
+id: net-ftp
+name: "FTP Service"
+target_type: network
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b21/tcp\b.*ftp|220 .*FTP'
+tactics:
+  phase: "Network Service Enumeration (FTP)"
+  priority: 35
+  next_step: "Test anonymous login first — a common, high-value misconfiguration."
+  tools:
+    - name: "nmap ftp"
+      binary: "nmap"
+      command: "nmap -p21 --script ftp-anon,ftp-syst {target_ip}"
+      purpose: "Check anonymous access and server details."
+---
+id: net-telnet-vnc
+name: "Telnet / VNC Legacy Service"
+target_type: network
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b23/tcp\b.*telnet|\b5900/tcp\b.*vnc|RFB 00'
+tactics:
+  phase: "Network Service Enumeration (Legacy)"
+  priority: 50
+  next_step: "Cleartext/legacy remote access — grab the banner, test no-auth VNC, and sniff credentials if on-path."
+  tools:
+    - name: "nmap vnc"
+      binary: "nmap"
+      command: "nmap -p5900 --script vnc-info,realvnc-auth-bypass {target_ip}"
+      purpose: "Check VNC auth and bypass exposure."
+---
+id: net-winrm
+name: "WinRM Management"
+target_type: network
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: '\b(5985|5986)/tcp\b|wsman|WinRM'
+tactics:
+  phase: "Network Service Enumeration (WinRM)"
+  priority: 62
+  next_step: "WinRM is a shell if you hold valid creds — spray, then drop into an interactive session."
+  tools:
+    - name: "nxc winrm"
+      binary: "nxc"
+      command: "nxc winrm {target_ip} -u users.txt -p passwords.txt"
+      purpose: "Validate credentials over WinRM."
+      install: "pipx install netexec"
+    - name: "evil-winrm"
+      binary: "evil-winrm"
+      command: "evil-winrm -i {target_ip} -u <user> -p <pass>"
+      purpose: "Interactive WinRM shell."
+      install: "gem install evil-winrm"
+---
+id: net-ipmi
+name: "IPMI / BMC Service"
+target_type: network
+author: official
+os_packages:
+  arch: [ipmitool, nmap]
+  debian: [ipmitool, nmap]
+  kali: [ipmitool, metasploit-framework, nmap]
+match:
+  logic: any
+  rules:
+    - regex: '\b623/udp\b|ipmi|asf-rmcp'
+tactics:
+  phase: "Network Service Enumeration (IPMI)"
+  priority: 58
+  next_step: "IPMI 2.0 leaks password hashes to any client (cipher-zero / RAKP) — dump and crack them."
+  tools:
+    - name: "nmap ipmi"
+      binary: "nmap"
+      command: "nmap -sU -p623 --script ipmi-version,ipmi-cipher-zero {target_ip}"
+      purpose: "Detect version and cipher-zero auth bypass."

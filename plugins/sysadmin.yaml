@@ -1,0 +1,188 @@
+# System administration / Linux operations plugins — triggered by health,
+# service, and diagnostic output.
+---
+id: sys-disk-full
+name: "Disk Space Exhaustion"
+target_type: host
+author: official
+os_packages:
+  arch: [ncdu]
+  debian: [ncdu]
+  kali: [ncdu]
+match:
+  logic: any
+  rules:
+    - regex: 'No space left on device|100%\s+/|disk full|ENOSPC|9[5-9]%\s+/'
+tactics:
+  phase: "System Operations (Disk)"
+  priority: 55
+  next_step: "Find the largest consumers, then clear safe reclaimable space (logs, caches, old journals)."
+  tools:
+    - name: "biggest dirs"
+      binary: "du"
+      command: "du -xhd1 / 2>/dev/null | sort -rh | head -20"
+      purpose: "Rank top-level directories by size."
+    - name: "ncdu"
+      binary: "ncdu"
+      command: "ncdu -x /"
+      purpose: "Interactive disk-usage explorer."
+    - name: "journal vacuum"
+      binary: "journalctl"
+      command: "journalctl --disk-usage ; journalctl --vacuum-size=200M"
+      purpose: "Reclaim space from systemd journals."
+---
+id: sys-high-load
+name: "High Load / CPU Saturation"
+target_type: host
+author: official
+os_packages:
+  arch: [htop, sysstat]
+  debian: [htop, sysstat]
+  kali: [htop, sysstat]
+match:
+  logic: any
+  rules:
+    - regex: 'load average: [0-9]{2,}|CPU.*9[0-9]%|%Cpu.*id.*[0-4]\.[0-9] id|high load'
+tactics:
+  phase: "System Operations (Performance)"
+  priority: 48
+  next_step: "Identify the hot processes and whether it is CPU, I/O wait, or run-queue depth, then act on the top offender."
+  tools:
+    - name: "top offenders"
+      binary: "ps"
+      command: "ps -eo pid,ppid,%cpu,%mem,comm --sort=-%cpu | head"
+      purpose: "List the most CPU-hungry processes."
+    - name: "pidstat / iostat"
+      binary: "pidstat"
+      command: "pidstat 1 5 ; iostat -xz 1 3"
+      purpose: "Separate CPU load from I/O wait."
+---
+id: sys-oom
+name: "Out-Of-Memory / Kernel Kill"
+target_type: host
+author: official
+os_packages:
+  arch: [util-linux]
+  debian: [util-linux]
+  kali: [util-linux]
+match:
+  logic: any
+  rules:
+    - regex: 'Out of memory|oom-killer|Killed process|Cannot allocate memory|OOM'
+tactics:
+  phase: "System Operations (Memory)"
+  priority: 52
+  next_step: "Find what was killed and the memory trend — decide between a leak, under-provisioning, or a runaway job."
+  tools:
+    - name: "oom report"
+      binary: "journalctl"
+      command: "journalctl -k | grep -iE 'out of memory|oom|killed process' | tail"
+      purpose: "Show the kernel OOM decisions."
+    - name: "memory by process"
+      binary: "ps"
+      command: "ps -eo pid,%mem,rss,comm --sort=-%mem | head"
+      purpose: "Rank processes by resident memory."
+---
+id: sys-service-failed
+name: "Failed / Crashing systemd Service"
+target_type: host
+author: official
+os_packages:
+  arch: [systemd]
+  debian: [systemd]
+  kali: [systemd]
+match:
+  logic: any
+  rules:
+    - regex: 'failed|Failed to start|Main process exited.*status=[0-9]+/|Active: failed|core dumped|segfault'
+tactics:
+  phase: "System Operations (Services)"
+  priority: 45
+  next_step: "Read the unit's recent logs and exit status, then inspect config/permissions or the recorded core dump."
+  tools:
+    - name: "failed units"
+      binary: "systemctl"
+      command: "systemctl --failed ; systemctl status <unit> -l --no-pager"
+      purpose: "List failures and the unit's state."
+    - name: "unit logs"
+      binary: "journalctl"
+      command: "journalctl -u <unit> -p err --since '-1h' --no-pager"
+      purpose: "Recent error-level logs for the unit."
+    - name: "coredumpctl"
+      binary: "coredumpctl"
+      command: "coredumpctl list ; coredumpctl gdb"
+      purpose: "Open the service's core dump in gdb."
+---
+id: sys-cert-expiry
+name: "TLS Certificate Expiry"
+target_type: host
+author: official
+os_packages:
+  arch: [openssl]
+  debian: [openssl]
+  kali: [openssl]
+match:
+  logic: any
+  rules:
+    - regex: 'certificate has expired|cert.*expir|notAfter|SSL certificate problem|CERTIFICATE_VERIFY_FAILED'
+tactics:
+  phase: "System Operations (PKI)"
+  priority: 40
+  next_step: "Check the remaining validity for the host(s), then renew/rotate before the next expiry."
+  tools:
+    - name: "check expiry"
+      binary: "openssl"
+      command: "echo | openssl s_client -connect {target_domain}:443 2>/dev/null | openssl x509 -noout -dates"
+      purpose: "Show notBefore/notAfter for the live cert."
+---
+id: sys-network-config
+name: "Network Connectivity / Config Issue"
+target_type: host
+author: official
+os_packages:
+  arch: [iproute2, mtr]
+  debian: [iproute2, mtr-tiny]
+  kali: [iproute2, mtr-tiny]
+match:
+  logic: any
+  rules:
+    - regex: 'Network is unreachable|No route to host|Name or service not known|Connection timed out|DNS resolution failed'
+tactics:
+  phase: "System Operations (Network)"
+  priority: 42
+  next_step: "Isolate the layer — link/route, DNS, or firewall — working outward from the interface."
+  tools:
+    - name: "link + route"
+      binary: "ip"
+      command: "ip -br a ; ip route ; resolvectl status"
+      purpose: "Check interfaces, routes, and DNS config."
+    - name: "path trace"
+      binary: "mtr"
+      command: "mtr -rwbzc 20 {target_domain}"
+      purpose: "Locate where connectivity breaks along the path."
+---
+id: sys-package-manager
+name: "Package Manager / Dependency Error"
+target_type: host
+author: official
+os_packages:
+  arch: []
+  debian: []
+  kali: []
+match:
+  logic: any
+  rules:
+    - regex: 'dpkg was interrupted|Could not get lock|broken packages|conflicting dependencies|signature.*invalid|GPG error|failed to synchronize'
+tactics:
+  phase: "System Operations (Packages)"
+  priority: 38
+  next_step: "Clear the lock/interrupted state and repair dependencies before retrying the upgrade."
+  tools:
+    - name: "apt repair"
+      binary: "apt"
+      command: "sudo dpkg --configure -a ; sudo apt --fix-broken install"
+      purpose: "Recover an interrupted dpkg/apt state (Debian/Kali)."
+    - name: "pacman keyring"
+      binary: "pacman"
+      command: "sudo pacman -Sy archlinux-keyring && sudo pacman -Syu"
+      purpose: "Refresh keyring and sync (Arch/BlackArch)."

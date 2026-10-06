@@ -76,15 +76,15 @@ advsec update-cache                     # refresh OS package mapping database
 
 ## How it works
 
-1. **Parse** - a bounded 2 MB streaming buffer reads stdin and extracts IPs,
+1. **Parse** — a bounded 2 MB streaming buffer reads stdin and extracts IPs,
    domains, URLs, ports, file headers, protocol banners, hashes, memory
    addresses, and CVEs with a fast RE2 engine.
-2. **Match** - each plugin's `match.rules` (regex / substring / entity-type) are
+2. **Match** — each plugin's `match.rules` (regex / substring / entity-type) are
    evaluated with `all`/`any` logic against the input.
-3. **Evaluate** - matched plugins are ranked by priority, command placeholders
+3. **Evaluate** — matched plugins are ranked by priority, command placeholders
    (`{target}`, `{target_ip}`, `{target_port}`, …) are expanded from parsed
    entities, and each recommended tool is checked against `PATH`.
-4. **Recommend** - prioritized phases, next steps, and ready-to-run commands are
+4. **Recommend** — prioritized phases, next steps, and ready-to-run commands are
    printed; missing tools come with the exact native install command for the
    detected distro (`pacman`/`yay` on Arch, `apt` on Debian/Kali).
 
@@ -97,8 +97,13 @@ Plugins are declarative YAML, loaded from (user overrides system):
 - `~/.config/advsec/plugins/` (also honors `$XDG_CONFIG_HOME` / `$ADVSEC_CONFIG_DIR`)
 - `/usr/share/advsec/plugins/`
 
-Bundled domains: `web`, `pwn`, `network`, `dfir`. A file may hold multiple
-plugins separated by `---`.
+The bundled library ships 125+ rules across 15 domains (a file may hold many
+plugins separated by `---`):
+
+`pwn` · `reversing` · `web` · `network` · `recon` · `redteam` · `blueteam` ·
+`forensics` · `crypto` · `ctf` · `cloud` · `sysadmin` · `dfir` · `mobile` ·
+`wireless` · `general` — covering pentest, red team, blue team / DFIR, RE,
+CTF, cloud/container, wireless, and day-to-day sysadmin triage.
 
 ### Schema
 
@@ -127,7 +132,14 @@ tactics:
       binary: checksec            # PATH check; defaults to first word of command
       command: "checksec --file={target}"
       purpose: "Enumerate binary protections."
+      install: "pipx install ..."  # optional: fallback when not distro-packaged
 ```
+
+`install` is an optional manager-agnostic install command (pip/pipx/go/cargo or
+a vendor script). It is used only when the tool is missing from `PATH` **and**
+no native package in `os_packages` provides it — so distro-packaged tools still
+get a native `pacman`/`apt` command, while pip/go-only tooling gets an accurate
+one.
 
 ### Command placeholders
 
@@ -148,7 +160,7 @@ advsec/
 │   ├── engine/     parser, matcher, evaluator
 │   ├── osdetect/   distro detection + package manager mapping
 │   └── plugin/     YAML types, loader, lifecycle manager
-├── plugins/        web.yaml, pwn.yaml, network.yaml, dfir.yaml
+├── plugins/        125+ rules across 15 domain files (see below)
 ├── Makefile
 ├── PKGBUILD
 └── install.sh
@@ -156,4 +168,4 @@ advsec/
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

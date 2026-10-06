@@ -6,7 +6,7 @@
     <a href="https://github.com/charmbracelet/colorprofile/actions"><img src="https://github.com/charmbracelet/colorprofile/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
 </p>
 
-A simple, powerful-and at times magical-package for detecting terminal color
+A simple, powerful—and at times magical—package for detecting terminal color
 profiles and performing color (and CSI) degradation.
 
 ## Detecting the terminal’s color profile

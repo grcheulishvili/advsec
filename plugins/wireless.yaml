@@ -1,0 +1,107 @@
+# Wireless / RF plugins — triggered by airodump, bluetooth, and capture output.
+---
+id: wifi-handshake
+name: "WPA Handshake / Capture"
+target_type: wireless
+author: official
+os_packages:
+  arch: [aircrack-ng, hashcat]
+  debian: [aircrack-ng, hashcat]
+  kali: [aircrack-ng, hashcat, hcxtools]
+match:
+  logic: any
+  rules:
+    - regex: 'WPA handshake|EAPOL|\.cap\b|\.pcap.*wlan|airodump|PMKID'
+tactics:
+  phase: "Wireless (WPA)"
+  priority: 55
+  next_step: "Convert the capture to hashcat format, then crack the PSK offline (PMKID needs no full handshake)."
+  tools:
+    - name: "hcxpcapngtool"
+      binary: "hcxpcapngtool"
+      command: "hcxpcapngtool -o hash.hc22000 {target}"
+      purpose: "Convert capture/PMKID to hashcat 22000 format."
+    - name: "hashcat wpa"
+      binary: "hashcat"
+      command: "hashcat -m 22000 hash.hc22000 /usr/share/wordlists/rockyou.txt"
+      purpose: "Crack the WPA/WPA2 PSK."
+    - name: "aircrack-ng"
+      binary: "aircrack-ng"
+      command: "aircrack-ng {target} -w /usr/share/wordlists/rockyou.txt"
+      purpose: "Classic handshake dictionary attack."
+---
+id: wifi-ap-scan
+name: "Wireless AP / Client Scan"
+target_type: wireless
+author: official
+os_packages:
+  arch: [aircrack-ng]
+  debian: [aircrack-ng]
+  kali: [aircrack-ng]
+match:
+  logic: any
+  rules:
+    - regex: 'BSSID|ESSID|airodump-ng|WPA2|WEP|PWR\s+Beacons|CH\s+[0-9]+\s+'
+tactics:
+  phase: "Wireless (Recon)"
+  priority: 40
+  next_step: "Lock onto the target BSSID/channel, enumerate associated clients, then capture a handshake or PMKID."
+  tools:
+    - name: "targeted capture"
+      binary: "airodump-ng"
+      command: "airodump-ng -c <ch> --bssid <BSSID> -w capture <mon-iface>"
+      purpose: "Capture frames for a specific AP."
+---
+id: rf-bluetooth
+name: "Bluetooth Device"
+target_type: wireless
+author: official
+os_packages:
+  arch: [bluez-utils]
+  debian: [bluez]
+  kali: [bluez, bluez-tools]
+match:
+  logic: any
+  rules:
+    - regex: 'bluetooth|hci[0-9]|BD_ADDR|[0-9A-F]{2}(:[0-9A-F]{2}){5}.*(LE|BR/EDR)|BLE'
+tactics:
+  phase: "Wireless (Bluetooth)"
+  priority: 35
+  next_step: "Enumerate device services/characteristics, then test for open GATT access and weak pairing."
+  tools:
+    - name: "bluetoothctl scan"
+      binary: "bluetoothctl"
+      command: "bluetoothctl scan on"
+      purpose: "Discover nearby devices."
+    - name: "gatttool / bettercap"
+      binary: "bettercap"
+      command: "bettercap -eval 'ble.recon on'"
+      purpose: "Enumerate BLE services and characteristics."
+      install: "go install github.com/bettercap/bettercap@latest"
+---
+id: rf-sdr
+name: "SDR / Raw RF Capture"
+target_type: wireless
+author: official
+os_packages:
+  arch: [rtl-sdr]
+  debian: [rtl-sdr]
+  kali: [rtl-sdr, gnuradio]
+match:
+  logic: any
+  rules:
+    - regex: 'rtl_sdr|SDR|\.iq\b|complex samples|433\.92|sample rate|gnuradio|HackRF'
+tactics:
+  phase: "Wireless (SDR)"
+  priority: 30
+  next_step: "Identify the modulation and frequency, then demodulate — common IoT/remotes live around 433/868/915 MHz."
+  tools:
+    - name: "rtl_433"
+      binary: "rtl_433"
+      command: "rtl_433 -f 433.92M"
+      purpose: "Decode common ISM-band device protocols."
+    - name: "URH"
+      binary: "urh"
+      command: "urh"
+      purpose: "Universal Radio Hacker for signal analysis."
+      install: "pipx install urh"

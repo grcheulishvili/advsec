@@ -1,8 +1,8 @@
-# Web / application-layer plugins.
-# Triggered by curl header dumps, whatweb output, nmap http service banners.
+# Web / application-layer plugins — triggered by curl header dumps, whatweb,
+# nmap http banners, and crawler output.
 ---
 id: web-http-service
-name: HTTP/HTTPS Service Detected
+name: "HTTP/HTTPS Service Detected"
 target_type: web
 author: official
 os_packages:
@@ -12,29 +12,30 @@ os_packages:
 match:
   logic: any
   rules:
-    - regex: "HTTP/[0-9.]+ [0-9]{3}"
-    - regex: "Server: "
-    - regex: "\\b(80|443|8080|8443)/tcp\\b.*http"
+    - regex: 'HTTP/[0-9.]+ [0-9]{3}'
+    - regex: 'Server: '
+    - regex: '\b(80|443|8080|8443)/tcp\b.*http'
 tactics:
   phase: "Web Reconnaissance"
-  priority: 50
-  next_step: "Fingerprint the stack, then enumerate directories and known vulnerabilities before touching parameters."
+  priority: 40
+  next_step: "Fingerprint the stack, then enumerate content and known vulns before touching parameters."
   tools:
-    - name: whatweb
-      binary: whatweb
+    - name: "whatweb"
+      binary: "whatweb"
       command: "whatweb -a 3 {target_url}"
-      purpose: "Aggressive technology fingerprinting (CMS, framework, server)."
-    - name: feroxbuster
-      binary: feroxbuster
-      command: "feroxbuster -u {target_url} -w /usr/share/wordlists/dirb/common.txt"
-      purpose: "Recursive content/directory discovery."
-    - name: nikto
-      binary: nikto
-      command: "nikto -host {target_url}"
-      purpose: "Scan for known server misconfigurations and dated vulnerabilities."
+      purpose: "Aggressive technology fingerprinting."
+    - name: "feroxbuster"
+      binary: "feroxbuster"
+      command: "feroxbuster -u {target_url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt"
+      purpose: "Recursive content discovery."
+    - name: "nuclei"
+      binary: "nuclei"
+      command: "nuclei -u {target_url}"
+      purpose: "Template-driven vulnerability scan."
+      install: "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
 ---
 id: web-wordpress
-name: WordPress Application
+name: "WordPress Application"
 target_type: web
 author: official
 os_packages:
@@ -46,19 +47,191 @@ match:
   rules:
     - contains: "wp-content"
     - contains: "wp-json"
-    - regex: "X-Powered-By:.*WordPress"
+    - regex: 'X-Powered-By:.*WordPress|/wp-login\.php'
 tactics:
   phase: "Web Exploitation (CMS)"
   priority: 70
-  next_step: "Enumerate plugins, themes, and users with WPScan; weak plugins are the usual entry point."
+  next_step: "Enumerate plugins, themes, and users — vulnerable plugins are the usual entry point."
   tools:
-    - name: wpscan
-      binary: wpscan
+    - name: "wpscan"
+      binary: "wpscan"
       command: "wpscan --url {target_url} --enumerate vp,vt,u --random-user-agent"
-      purpose: "Enumerate vulnerable plugins/themes and usernames."
+      purpose: "Enumerate vulnerable components and usernames."
+---
+id: web-sqli-param
+name: "SQL Error / Injectable Parameter"
+target_type: web
+author: official
+os_packages:
+  arch: [sqlmap]
+  debian: [sqlmap]
+  kali: [sqlmap]
+match:
+  logic: any
+  rules:
+    - regex: 'SQL syntax.*MySQL|ORA-[0-9]{5}|PostgreSQL.*ERROR|Unclosed quotation mark|SQLSTATE'
+    - regex: 'you have an error in your sql syntax'
+tactics:
+  phase: "Web Exploitation (SQLi)"
+  priority: 85
+  next_step: "A database error is leaking — confirm and automate exploitation of the injectable parameter."
+  tools:
+    - name: "sqlmap"
+      binary: "sqlmap"
+      command: "sqlmap -u '{target_url}' --batch --risk 2 --level 3 --dbs"
+      purpose: "Detect and exploit SQL injection, dump schemas."
+---
+id: web-lfi-traversal
+name: "LFI / Path Traversal Indicator"
+target_type: web
+author: official
+os_packages:
+  arch: [ffuf, curl]
+  debian: [ffuf, curl]
+  kali: [ffuf, curl]
+match:
+  logic: any
+  rules:
+    - regex: 'root:.*:0:0:|/etc/passwd|\.\./\.\./|php://filter|data://'
+tactics:
+  phase: "Web Exploitation (LFI)"
+  priority: 80
+  next_step: "File contents are leaking — escalate to log poisoning or php filter chains for code execution."
+  tools:
+    - name: "ffuf LFI"
+      binary: "ffuf"
+      command: "ffuf -u '{target_url}?file=FUZZ' -w /usr/share/seclists/Fuzzing/LFI/LFI-Jhaddix.txt"
+      purpose: "Fuzz traversal payloads against the parameter."
+---
+id: web-ssti
+name: "Server-Side Template Injection"
+target_type: web
+author: official
+os_packages:
+  arch: [python-pip]
+  debian: [python3-pip]
+  kali: [python3-pip]
+match:
+  logic: any
+  rules:
+    - regex: '\{\{7\*7\}\}|49|Jinja2|Twig|Freemarker|template error'
+tactics:
+  phase: "Web Exploitation (SSTI)"
+  priority: 78
+  next_step: "Template math evaluated — identify the engine, then escalate to RCE via its sandbox escape."
+  tools:
+    - name: "tplmap"
+      binary: "tplmap"
+      command: "tplmap -u '{target_url}'"
+      purpose: "Detect and exploit SSTI across engines."
+      install: "git clone https://github.com/epinna/tplmap"
+---
+id: web-ssrf
+name: "SSRF Candidate"
+target_type: web
+author: official
+os_packages:
+  arch: [curl]
+  debian: [curl]
+  kali: [curl]
+match:
+  logic: any
+  rules:
+    - regex: 'url=|redirect=|dest=|uri=|path=|continue=|169\.254\.169\.254'
+tactics:
+  phase: "Web Exploitation (SSRF)"
+  priority: 60
+  next_step: "A URL-taking parameter may reach internal services — target cloud metadata and localhost admin ports."
+  tools:
+    - name: "metadata probe"
+      binary: "curl"
+      command: "curl -s '{target_url}?url=http://169.254.169.254/latest/meta-data/'"
+      purpose: "Attempt to read cloud instance metadata via SSRF."
+    - name: "interactsh"
+      binary: "interactsh-client"
+      command: "interactsh-client"
+      purpose: "Catch blind SSRF out-of-band callbacks."
+      install: "go install github.com/projectdiscovery/interactsh/cmd/interactsh-client@latest"
+---
+id: web-xxe
+name: "XML Input / XXE Candidate"
+target_type: web
+author: official
+os_packages:
+  arch: [curl]
+  debian: [curl]
+  kali: [curl]
+match:
+  logic: any
+  rules:
+    - regex: '<\?xml|text/xml|application/xml|<!DOCTYPE|SOAPAction'
+tactics:
+  phase: "Web Exploitation (XXE)"
+  priority: 55
+  next_step: "XML parsing present — test external-entity injection for file read and SSRF."
+  tools:
+    - name: "xxe payload"
+      binary: "curl"
+      command: "curl -s -X POST -H 'Content-Type: application/xml' --data-binary @xxe.xml '{target_url}'"
+      purpose: "Submit an external-entity payload for file disclosure."
+---
+id: web-jwt
+name: "JWT Token Observed"
+target_type: web
+author: official
+os_packages:
+  arch: [jq]
+  debian: [jq]
+  kali: [jq]
+match:
+  logic: any
+  rules:
+    - regex: 'eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{0,}'
+    - regex: 'Authorization: Bearer'
+tactics:
+  phase: "Web Exploitation (Auth/JWT)"
+  priority: 58
+  next_step: "Inspect the header/claims — test alg:none, key confusion (RS256->HS256), and weak HMAC secrets."
+  tools:
+    - name: "jwt_tool"
+      binary: "jwt_tool"
+      command: "jwt_tool <token> -M at"
+      purpose: "Tamper, test alg confusion, and crack JWT secrets."
+      install: "pipx install jwt-tool"
+    - name: "hashcat JWT"
+      binary: "hashcat"
+      command: "hashcat -m 16500 jwt.txt /usr/share/wordlists/rockyou.txt"
+      purpose: "Crack a weak HS256 signing secret."
+---
+id: web-graphql
+name: "GraphQL Endpoint"
+target_type: web
+author: official
+os_packages:
+  arch: [curl, jq]
+  debian: [curl, jq]
+  kali: [curl, jq]
+match:
+  logic: any
+  rules:
+    - regex: '/graphql|__schema|GraphQL|query\s*\{|mutation\s*\{'
+tactics:
+  phase: "API Testing (GraphQL)"
+  priority: 50
+  next_step: "Run introspection to map the full schema, then probe each query/mutation for authz gaps."
+  tools:
+    - name: "introspection"
+      binary: "curl"
+      command: "curl -s '{target_url}' -H 'Content-Type: application/json' -d '{\"query\":\"{__schema{types{name}}}\"}' | jq ."
+      purpose: "Dump the GraphQL schema via introspection."
+    - name: "graphw00f"
+      binary: "graphw00f"
+      command: "graphw00f -d -t {target_url}"
+      purpose: "Fingerprint the GraphQL engine."
+      install: "pipx install graphw00f"
 ---
 id: web-git-exposed
-name: Exposed .git Directory
+name: "Exposed .git Directory"
 target_type: web
 author: official
 os_packages:
@@ -69,48 +242,96 @@ match:
   logic: any
   rules:
     - contains: "/.git/"
-    - contains: "[core]"
-    - regex: "ref: refs/heads"
+    - regex: 'ref: refs/heads|\[core\]'
 tactics:
   phase: "Source Disclosure"
-  priority: 85
-  next_step: "A reachable .git tree usually means full source recovery - dump it and review for secrets and logic flaws."
+  priority: 82
+  next_step: "A reachable .git tree usually means full source recovery — dump it and scan for secrets."
   tools:
-    - name: git-dumper
-      binary: git-dumper
-      command: "git-dumper {target_url}/.git ./dumped-src"
-      purpose: "Reconstruct the repository from an exposed .git directory."
-    - name: trufflehog
-      binary: trufflehog
-      command: "trufflehog filesystem ./dumped-src"
-      purpose: "Scan the recovered source for committed secrets."
+    - name: "git-dumper"
+      binary: "git-dumper"
+      command: "git-dumper {target_url}/.git ./src"
+      purpose: "Reconstruct the repo from an exposed .git."
+      install: "pipx install git-dumper"
+    - name: "trufflehog"
+      binary: "trufflehog"
+      command: "trufflehog filesystem ./src"
+      purpose: "Scan recovered source for committed secrets."
+      install: "pipx install trufflehog"
 ---
-id: web-api-swagger
-name: API / Swagger Documentation
+id: web-tomcat-manager
+name: "Apache Tomcat / Manager"
 target_type: web
 author: official
 os_packages:
-  arch: [jq, curl]
-  debian: [jq, curl]
-  kali: [jq, curl]
+  arch: [metasploit, hydra]
+  debian: [metasploit-framework, hydra]
+  kali: [metasploit-framework, hydra]
 match:
   logic: any
   rules:
-    - contains: "swagger"
-    - contains: "openapi"
-    - contains: "application/json"
+    - regex: 'Apache Tomcat|Coyote|/manager/html|Tomcat/[0-9]'
 tactics:
-  phase: "API Testing"
-  priority: 40
-  next_step: "Map every documented endpoint, then probe authN/authZ and mass-assignment on each."
+  phase: "Web Exploitation (App Server)"
+  priority: 68
+  next_step: "Target /manager with default creds — a WAR upload yields RCE."
   tools:
-    - name: curl
-      binary: curl
-      command: "curl -s {target_url} | jq ."
-      purpose: "Pretty-print the API/spec response for manual review."
+    - name: "hydra tomcat"
+      binary: "hydra"
+      command: "hydra -C /usr/share/seclists/Passwords/Default-Credentials/tomcat-betterdefaultpasslist.txt {target_ip} http-get /manager/html"
+      purpose: "Brute the manager with known default pairs."
+    - name: "msf tomcat upload"
+      binary: "msfconsole"
+      command: "msfconsole -q -x 'use exploit/multi/http/tomcat_mgr_upload'"
+      purpose: "Deploy a malicious WAR for RCE."
+---
+id: web-jenkins
+name: "Jenkins CI"
+target_type: web
+author: official
+os_packages:
+  arch: [curl]
+  debian: [curl]
+  kali: [curl]
+match:
+  logic: any
+  rules:
+    - regex: 'X-Jenkins|Jenkins-Agent|/script|Dashboard \[Jenkins\]'
+tactics:
+  phase: "Web Exploitation (CI/CD)"
+  priority: 72
+  next_step: "The Groovy script console is instant RCE if reachable — also check for anonymous job/config access."
+  tools:
+    - name: "script console"
+      binary: "curl"
+      command: "curl -s '{target_url}/script'"
+      purpose: "Test access to the Groovy console."
+---
+id: web-log4shell
+name: "Java Stack / Log4Shell Surface"
+target_type: web
+author: official
+os_packages:
+  arch: [curl]
+  debian: [curl]
+  kali: [curl]
+match:
+  logic: any
+  rules:
+    - regex: 'java\.lang|Spring|Struts|X-Powered-By:.*(JSP|Servlet)|jsessionid'
+tactics:
+  phase: "Web Exploitation (Java)"
+  priority: 64
+  next_step: "Java app surface — test JNDI injection (Log4Shell) in headers/inputs and known deserialization sinks."
+  tools:
+    - name: "nuclei log4j"
+      binary: "nuclei"
+      command: "nuclei -u {target_url} -tags log4j,cve"
+      purpose: "Check for Log4Shell and known Java CVEs."
+      install: "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
 ---
 id: web-waf-detected
-name: WAF / CDN In Front
+name: "WAF / CDN In Front"
 target_type: web
 author: official
 os_packages:
@@ -120,14 +341,35 @@ os_packages:
 match:
   logic: any
   rules:
-    - regex: "Server:.*cloudflare"
-    - regex: "X-Sucuri-ID|X-CDN|cf-ray"
+    - regex: 'Server:.*cloudflare|X-Sucuri-ID|X-CDN|cf-ray|Akamai|Incapsula'
 tactics:
   phase: "Evasion Planning"
-  priority: 30
-  next_step: "Identify the WAF/CDN, then find the origin IP before spending time on payload tuning."
+  priority: 25
+  next_step: "Identify the WAF, then find the origin IP before tuning payloads."
   tools:
-    - name: wafw00f
-      binary: wafw00f
+    - name: "wafw00f"
+      binary: "wafw00f"
       command: "wafw00f {target_url}"
-      purpose: "Identify the specific WAF product in front of the app."
+      purpose: "Identify the specific WAF product."
+---
+id: web-api-swagger
+name: "API / Swagger / OpenAPI"
+target_type: web
+author: official
+os_packages:
+  arch: [jq, curl]
+  debian: [jq, curl]
+  kali: [jq, curl]
+match:
+  logic: any
+  rules:
+    - regex: 'swagger|openapi|/api/v[0-9]|application/json'
+tactics:
+  phase: "API Testing"
+  priority: 38
+  next_step: "Map every documented endpoint, then probe authN/authZ and mass-assignment on each."
+  tools:
+    - name: "curl + jq"
+      binary: "curl"
+      command: "curl -s {target_url} | jq ."
+      purpose: "Pretty-print the API/spec response."

@@ -1,0 +1,180 @@
+# Cryptography / encoding plugins — triggered by hashes, encoded blobs, keys,
+# and CTF crypto artifacts.
+---
+id: crypto-hash-id
+name: "Unidentified Hash"
+target_type: crypto
+author: official
+os_packages:
+  arch: [hashcat, john]
+  debian: [hashcat, john]
+  kali: [hashcat, john, hash-identifier]
+match:
+  logic: any
+  rules:
+    - entity_type: hash
+tactics:
+  phase: "Cryptanalysis (Hash)"
+  priority: 30
+  next_step: "Identify the hash type, pick the matching hashcat mode, then crack with a wordlist + rules."
+  tools:
+    - name: "name-that-hash"
+      binary: "nth"
+      command: "nth -t {target_hash}"
+      purpose: "Identify hash type and suggest hashcat/john modes."
+      install: "pipx install name-that-hash"
+    - name: "hashcat"
+      binary: "hashcat"
+      command: "hashcat -m <mode> {target_hash} /usr/share/wordlists/rockyou.txt -r /usr/share/hashcat/rules/best64.rule"
+      purpose: "GPU-accelerated cracking."
+    - name: "john"
+      binary: "john"
+      command: "john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt"
+      purpose: "CPU cracking with format auto-detect."
+---
+id: crypto-base64
+name: "Base64 / Encoded Blob"
+target_type: crypto
+author: official
+os_packages:
+  arch: [coreutils]
+  debian: [coreutils]
+  kali: [coreutils]
+match:
+  logic: any
+  rules:
+    - regex: '\b[A-Za-z0-9+/]{24,}={0,2}\b'
+tactics:
+  phase: "Decoding"
+  priority: 15
+  next_step: "Decode the blob — it may nest further encodings, compression, or a serialized object."
+  tools:
+    - name: "base64 -d"
+      binary: "base64"
+      command: "echo '<blob>' | base64 -d | xxd | head"
+      purpose: "Decode and inspect the raw bytes."
+    - name: "CyberChef (Magic)"
+      binary: "cyberchef"
+      command: "# paste into CyberChef and run the Magic operation"
+      purpose: "Auto-detect multi-layer encodings."
+---
+id: crypto-hex-blob
+name: "Hex-Encoded Data"
+target_type: crypto
+author: official
+os_packages:
+  arch: [coreutils, xxd]
+  debian: [coreutils, xxd]
+  kali: [coreutils, xxd]
+match:
+  logic: any
+  rules:
+    - regex: '\b(?:[0-9a-fA-F]{2}){16,}\b|\\x[0-9a-fA-F]{2}'
+tactics:
+  phase: "Decoding"
+  priority: 14
+  next_step: "Un-hex the stream and identify the resulting file type or plaintext."
+  tools:
+    - name: "xxd reverse"
+      binary: "xxd"
+      command: "echo '<hex>' | xxd -r -p | file -"
+      purpose: "Convert hex to bytes and detect the type."
+---
+id: crypto-jwt
+name: "JSON Web Token"
+target_type: crypto
+author: official
+os_packages:
+  arch: [hashcat]
+  debian: [hashcat]
+  kali: [hashcat]
+match:
+  logic: any
+  rules:
+    - regex: 'eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.'
+tactics:
+  phase: "Cryptanalysis (JWT)"
+  priority: 40
+  next_step: "Decode the claims, then test alg:none, RS256->HS256 confusion, and crack weak HMAC secrets."
+  tools:
+    - name: "jwt_tool"
+      binary: "jwt_tool"
+      command: "jwt_tool <token> -M at"
+      purpose: "Analyse and attack the token."
+      install: "pipx install jwt-tool"
+    - name: "hashcat jwt"
+      binary: "hashcat"
+      command: "hashcat -m 16500 jwt.txt /usr/share/wordlists/rockyou.txt"
+      purpose: "Crack a weak HS256 secret."
+---
+id: crypto-rsa-key
+name: "RSA Key / Parameters"
+target_type: crypto
+author: official
+os_packages:
+  arch: [openssl]
+  debian: [openssl]
+  kali: [openssl]
+match:
+  logic: any
+  rules:
+    - regex: '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|-----BEGIN PUBLIC KEY|modulus|n\s*=\s*[0-9]{20,}|publicExponent'
+tactics:
+  phase: "Cryptanalysis (RSA)"
+  priority: 42
+  next_step: "Inspect the key size and modulus; small/shared/structured n may factor (RsaCtfTool handles the common attacks)."
+  tools:
+    - name: "openssl inspect"
+      binary: "openssl"
+      command: "openssl rsa -in key.pem -text -noout"
+      purpose: "Show key parameters."
+    - name: "RsaCtfTool"
+      binary: "RsaCtfTool"
+      command: "RsaCtfTool --publickey key.pub --private"
+      purpose: "Run the standard RSA attacks (Fermat, Wiener, factordb, etc.)."
+      install: "git clone https://github.com/RsaCtfTool/RsaCtfTool"
+---
+id: crypto-xor
+name: "XOR / Repeating-Key Cipher"
+target_type: crypto
+author: official
+os_packages:
+  arch: [python-pip]
+  debian: [python3-pip]
+  kali: [python3-pip]
+match:
+  logic: any
+  rules:
+    - regex: 'xor|repeating key|single-byte|vigen[eè]re'
+tactics:
+  phase: "Cryptanalysis (XOR)"
+  priority: 25
+  next_step: "Recover the key length (Hamming/Kasiski), then solve each byte by frequency analysis."
+  tools:
+    - name: "xortool"
+      binary: "xortool"
+      command: "xortool {target}"
+      purpose: "Guess XOR key length and recover the key."
+      install: "pipx install xortool"
+---
+id: crypto-cert
+name: "X.509 Certificate"
+target_type: crypto
+author: official
+os_packages:
+  arch: [openssl]
+  debian: [openssl]
+  kali: [openssl]
+match:
+  logic: any
+  rules:
+    - regex: '-----BEGIN CERTIFICATE-----|notBefore|notAfter|Signature Algorithm'
+tactics:
+  phase: "Cryptanalysis (PKI)"
+  priority: 28
+  next_step: "Read the subject, SANs, validity, and signature algorithm — weak algos or extra SANs are findings."
+  tools:
+    - name: "openssl x509"
+      binary: "openssl"
+      command: "openssl x509 -in cert.pem -text -noout"
+      purpose: "Decode the certificate fully."
