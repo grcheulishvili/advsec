@@ -22,6 +22,11 @@ var ignoredDomains = map[string]bool{
 	"example.com":           true,
 	"example.org":           true,
 	"localhost":             true,
+	// Documentation / help-text placeholders that are never real targets.
+	"target":        true,
+	"target_ip":     true,
+	"target_domain": true,
+	"target_url":    true,
 }
 
 // isIgnoredDomain reports whether a host is, or is a subdomain of, an ignored

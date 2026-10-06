@@ -30,6 +30,10 @@ const (
 	FormatShell      Format = "code/shell"
 	FormatNmap       Format = "network/nmap"
 	FormatSocket     Format = "network/socket"
+
+	// FormatAdvsecOutput marks advsec's own rendered output / help text piped
+	// back into advsec, so we don't extract example placeholders as targets.
+	FormatAdvsecOutput Format = "text/advsec_output"
 )
 
 // classifyWindow is how many leading bytes the profiler inspects.
@@ -46,6 +50,8 @@ var (
 	rePowerShell = regexp.MustCompile(`(?m)\$env:|Invoke-[A-Z]|-[Ee]ncodedCommand|\[System\.[A-Za-z]|\[Ref\]\.Assembly|\bIEX\b|New-Object\s+Net\.WebClient`)
 	reJavaScript = regexp.MustCompile(`(?m)function\s*\(|=>|document\.(cookie|write|location)|window\[|window\.|eval\(|_0x[0-9a-fA-F]{2,}|console\.log|require\(|module\.exports|atob\(`)
 	reShellBang  = regexp.MustCompile(`(?m)^#!\s*/(bin|usr/bin)/`)
+	// reAdvsecOut recognizes advsec's own banner, phase headers, and help page.
+	reAdvsecOut = regexp.MustCompile(`(?m)ADVSEC\s*\xe2\x94\x82|ADVSEC \||\[Phase \d|Usage:\s+advsec|advsec reads piped stdin|Tactical Objective:|Inferred Intent:`)
 )
 
 // Classify profiles the first bytes of raw input and returns its format.
@@ -84,6 +90,11 @@ func Classify(raw string) Format {
 	}
 
 	// --- structured text heuristics (most specific first) ---
+	// advsec's own output / help text takes precedence so `advsec --help | advsec`
+	// and `advsec | advsec` don't mine example placeholders as real targets.
+	if reAdvsecOut.MatchString(head) {
+		return FormatAdvsecOutput
+	}
 	if reEmailHdr.MatchString(head) {
 		return FormatEmail
 	}
@@ -130,6 +141,8 @@ func formatScope(f Format) (allowed map[string]bool, ok bool) {
 		return m
 	}
 	switch f {
+	case FormatAdvsecOutput:
+		return set(), true // scope to nothing: advsec output has no real targets
 	case FormatEmail:
 		return set("eml", "crypto"), true
 	case FormatJavaScript:

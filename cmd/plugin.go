@@ -69,11 +69,14 @@ func newPluginInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install <github-repo | git-url | yaml-url>",
 		Short: "Fetch and install community plugins",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		Example: `  advsec plugin install owner/advsec-extra
   advsec plugin install https://github.com/owner/advsec-extra.git
   advsec plugin install https://example.com/rules/web.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<github-repo | git-url | yaml-url>")
+			}
 			mgr := plugin.NewManager()
 			dest, err := mgr.Install(args[0])
 			if err != nil {

@@ -126,6 +126,7 @@ var fileyTLDs = map[string]bool{
 	"exe": true, "dll": true, "bin": true, "dat": true, "db": true,
 	"elf": true, "img": true, "iso": true, "dmp": true, "raw": true,
 	"pcap": true, "pcapng": true, "eml": true, "msg": true, "apk": true,
+	"ps1": true, "rb": true, "pl": true,
 }
 
 // Parse reads up to MaxBufferBytes from r and returns a populated Context.
@@ -181,6 +182,12 @@ func ParseString(raw string) *Context {
 		for _, v := range vals {
 			ctx.Entities[k] = appendUnique(ctx.Entities[k], v)
 		}
+	}
+
+	// advsec's own output / help text carries only example placeholders, never
+	// real targets - skip extraction entirely.
+	if ctx.Format == FormatAdvsecOutput {
+		return ctx
 	}
 
 	external := false

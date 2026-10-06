@@ -11,9 +11,17 @@ import (
 
 // blockMarker identifies an already-installed integration block so --install
 // stays idempotent.
-const blockMarker = "# >>> advsec shell integration"
+const (
+	blockStartPrefix = "# >>> advsec shell integration"
+	blockEndPrefix   = "# <<< advsec shell integration"
+	// blockMarker is kept for existing tests / presence checks.
+	blockMarker = blockStartPrefix
+)
 
-var flagInitInstall bool
+var (
+	flagInitInstall bool
+	flagInitForce   bool
+)
 
 func newInitCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -41,7 +49,7 @@ of syntax errors.
 				return runInitInstall(shell)
 			}
 			if len(args) != 1 {
-				return fmt.Errorf("specify a shell (zsh|bash) or use --install")
+				return missingArg(cmd, "[zsh|bash] (or use --install)")
 			}
 			snippet, err := snippetFor(args[0])
 			if err != nil {
@@ -54,7 +62,8 @@ of syntax errors.
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&flagInitInstall, "install", false, "detect the active shell and append the snippet to its rc file")
+	c.Flags().BoolVar(&flagInitInstall, "install", false, "detect the active shell and append (or update) the snippet in its rc file")
+	c.Flags().BoolVarP(&flagInitForce, "force", "f", false, "with --install, replace an existing advsec block even if unchanged")
 	return c
 }
 
@@ -88,11 +97,20 @@ func runInitInstall(shell string) error {
 	}
 	rc := filepath.Join(home, map[string]string{"zsh": ".zshrc", "bash": ".bashrc"}[shell])
 
-	if existing, err := os.ReadFile(rc); err == nil {
-		if strings.Contains(string(existing), blockMarker) {
-			fmt.Printf("advsec: integration already present in %s (nothing to do)\n", rc)
+	existing, _ := os.ReadFile(rc)
+	if updated, replaced := replaceBlock(string(existing), snippet); replaced {
+		// An old block is present: update it in place (unless it is already
+		// identical and --force was not given).
+		if !flagInitForce && strings.Contains(string(existing), strings.TrimRight(snippet, "\n")) {
+			fmt.Printf("advsec: integration already up to date in %s (use --force to rewrite)\n", rc)
 			return nil
 		}
+		if err := os.WriteFile(rc, []byte(updated), 0o644); err != nil {
+			return fmt.Errorf("update %s: %w", rc, err)
+		}
+		fmt.Printf("advsec: updated %s integration in %s (refreshed keybindings)\n", shell, rc)
+		fmt.Printf("Reload it with:  source %s   (then press Alt+A)\n", rc)
+		return nil
 	}
 
 	f, err := os.OpenFile(rc, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -104,8 +122,32 @@ func runInitInstall(shell string) error {
 		return err
 	}
 	fmt.Printf("advsec: installed %s integration into %s\n", shell, rc)
-	fmt.Printf("Reload it with:  source %s   (then press Ctrl+Alt+A)\n", rc)
+	fmt.Printf("Reload it with:  source %s   (then press Alt+A)\n", rc)
 	return nil
+}
+
+// replaceBlock swaps the content between the advsec start/end markers with the
+// fresh snippet, preserving surrounding content. Returns (newContent, true) if
+// a block was found and replaced, else ("", false).
+func replaceBlock(content, snippet string) (string, bool) {
+	start := strings.Index(content, blockStartPrefix)
+	if start < 0 {
+		return "", false
+	}
+	end := strings.Index(content[start:], blockEndPrefix)
+	if end < 0 {
+		return "", false
+	}
+	// Advance past the end-marker line.
+	endAbs := start + end
+	if nl := strings.IndexByte(content[endAbs:], '\n'); nl >= 0 {
+		endAbs += nl + 1
+	} else {
+		endAbs = len(content)
+	}
+	// Trim a single trailing newline of the new snippet to match block framing.
+	newBlock := strings.TrimRight(snippet, "\n") + "\n"
+	return content[:start] + newBlock + content[endAbs:], true
 }
 
 // detectShell resolves the active shell from $SHELL, falling back to the parent
@@ -180,8 +222,9 @@ if [ -n "$BASH_VERSION" ]; then
         eval "$last" 2>&1 | advsec --top 3
     }
     bind -x '"\e\C-a": _advsec_widget' 2>/dev/null   # Ctrl+Alt+A
+    bind -x '"\e\C-A": _advsec_widget' 2>/dev/null   # Ctrl+Alt+Shift+A
     bind -x '"\ea": _advsec_widget' 2>/dev/null      # Alt+a
-    bind -x '"\eA": _advsec_widget' 2>/dev/null      # Alt+A
+    bind -x '"\eA": _advsec_widget' 2>/dev/null      # Alt+Shift+A
 fi
 # <<< advsec shell integration (bash) <<<
 `

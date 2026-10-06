@@ -100,6 +100,50 @@ Running `advsec` on its own (no pipe) just prints help.
 
 ---
 
+## Creating & sharing custom plugins
+
+advsec rules are plain YAML - you can add your own in minutes.
+
+**1. Where they live.** Drop `.yaml` files in `~/.config/advsec/plugins/`. They load automatically and override bundled rules that share the same `id`.
+
+**2. Minimal template.** Save this as `~/.config/advsec/plugins/my-rule.yaml`:
+
+```yaml
+id: my-jwt-check                 # unique id
+name: "JWT in Response"
+domain: web                      # which -c context it belongs to
+match:
+  logic: any
+  rules:
+    - regex: 'eyJ[A-Za-z0-9_-]{10,}\.'   # a JWT in the stream
+tactics:
+  phase: "Web Auth"
+  next_step: "Decode the token and test for weak signing."
+  tools:
+    - name: "jwt_tool"
+      binary: "jwt_tool"
+      command: "jwt_tool {target_url}"
+      purpose: "Inspect and attack the JWT."
+      install: "pipx install jwt-tool"   # shown if jwt_tool isn't on PATH
+```
+
+**3. Test it locally.** Point advsec at a folder without installing:
+
+```sh
+echo 'set-cookie: s=eyJhbGciOiJ...' | advsec --plugins-dir ./my-plugins
+# or just place the file in ~/.config/advsec/plugins/ and pipe as usual
+advsec plugin list    # confirm it loaded
+```
+
+**4. Share it.** Publish your `.yaml` (or a repo of them) on GitHub, and anyone can install it anonymously:
+
+```sh
+advsec plugin install owner/advsec-extra          # a GitHub repo of rules
+advsec plugin install https://example.com/x.yaml   # a single hosted rule
+```
+
+See the appendix for the full field reference (`step`, `phase_label`, `os_packages`, entity placeholders).
+
 ## Installation
 
 Requires Go 1.22+ to build.

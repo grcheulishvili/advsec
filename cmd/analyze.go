@@ -52,6 +52,13 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := engine.ParseString(input)
+
+	// Guard against advsec's own output / help text being piped back in.
+	if (flagFormat == "" && ctx.Format == engine.FormatAdvsecOutput) || flagFormat == string(engine.FormatAdvsecOutput) {
+		fmt.Println("advsec: input identified as advsec output or help page - no actionable targets found.")
+		return nil
+	}
+
 	host := osdetect.Detect()
 
 	dirs := plugin.SearchDirs()

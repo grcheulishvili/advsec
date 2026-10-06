@@ -12,7 +12,7 @@ import (
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "0.9.0"
+	Version = "1.0.0"
 	Commit  = "dev"
 	Date    = "unknown"
 )
@@ -57,6 +57,14 @@ Examples:
 		}
 		return runAnalyze(cmd, args)
 	},
+}
+
+// missingArg prints a friendly notice plus the command's own help, instead of a
+// raw Cobra "accepts 1 arg(s)" error, and exits cleanly.
+func missingArg(cmd *cobra.Command, name string) error {
+	fmt.Fprintf(cmd.ErrOrStderr(), "advsec: missing required argument %s\n\n", name)
+	_ = cmd.Help()
+	return nil
 }
 
 // Execute is the program entry point invoked from main.
