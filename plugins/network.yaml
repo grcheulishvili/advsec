@@ -1,0 +1,131 @@
+# Network service plugins.
+# Triggered by nmap -sV / banner output for common services.
+---
+id: net-ssh-service
+name: SSH Service
+target_type: network
+author: official
+os_packages:
+  arch: [hydra, nmap]
+  debian: [hydra, nmap]
+  kali: [hydra, nmap]
+match:
+  logic: any
+  rules:
+    - regex: "\\b22/tcp\\b.*ssh"
+    - regex: "SSH-[0-9.]+-OpenSSH"
+tactics:
+  phase: "Network Service Enumeration"
+  priority: 40
+  next_step: "Grab the exact version for known CVEs, enumerate auth methods, and only then consider credential attacks."
+  tools:
+    - name: nmap ssh scripts
+      binary: nmap
+      command: "nmap -p22 --script ssh2-enum-algos,ssh-auth-methods {target_ip}"
+      purpose: "Enumerate supported algorithms and authentication methods."
+    - name: hydra
+      binary: hydra
+      command: "hydra -L users.txt -P passwords.txt ssh://{target_ip}"
+      purpose: "Credential brute force (only with authorization)."
+---
+id: net-smb-service
+name: SMB / NetBIOS Service
+target_type: network
+author: official
+os_packages:
+  arch: [smbclient, enum4linux-ng, nmap]
+  debian: [smbclient, enum4linux, nmap]
+  kali: [smbclient, enum4linux-ng, nmap]
+match:
+  logic: any
+  rules:
+    - regex: "\\b(139|445)/tcp\\b"
+    - regex: "microsoft-ds|netbios-ssn"
+tactics:
+  phase: "Network Service Enumeration (SMB)"
+  priority: 65
+  next_step: "Enumerate shares, users, and OS info; check for null sessions and EternalBlue-class exposure."
+  tools:
+    - name: enum4linux-ng
+      binary: enum4linux-ng
+      command: "enum4linux-ng -A {target_ip}"
+      purpose: "Full SMB/RPC enumeration (shares, users, groups, policy)."
+    - name: nmap smb-vuln
+      binary: nmap
+      command: "nmap -p445 --script smb-vuln* {target_ip}"
+      purpose: "Check for known SMB vulnerabilities (MS17-010, etc.)."
+    - name: smbclient
+      binary: smbclient
+      command: "smbclient -L //{target_ip}/ -N"
+      purpose: "List shares with a null session."
+---
+id: net-ftp-service
+name: FTP Service
+target_type: network
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap]
+match:
+  logic: any
+  rules:
+    - regex: "\\b21/tcp\\b.*ftp"
+    - regex: "220 .*FTP"
+tactics:
+  phase: "Network Service Enumeration (FTP)"
+  priority: 35
+  next_step: "Test anonymous login first; it is a common and high-value misconfiguration."
+  tools:
+    - name: nmap ftp scripts
+      binary: nmap
+      command: "nmap -p21 --script ftp-anon,ftp-syst {target_ip}"
+      purpose: "Check anonymous access and grab server details."
+---
+id: net-database-service
+name: Exposed Database Service
+target_type: network
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap]
+match:
+  logic: any
+  rules:
+    - regex: "\\b3306/tcp\\b.*mysql"
+    - regex: "\\b5432/tcp\\b.*postgres"
+    - regex: "\\b27017/tcp\\b.*mongodb"
+    - regex: "\\b6379/tcp\\b.*redis"
+tactics:
+  phase: "Data Store Exposure"
+  priority: 75
+  next_step: "An internet-facing database is high severity - test for default/empty credentials and unauthenticated access immediately."
+  tools:
+    - name: nmap db scripts
+      binary: nmap
+      command: "nmap -sV --script '*-info,*-empty-password' -p {target_port} {target_ip}"
+      purpose: "Fingerprint the database and check for unauthenticated access."
+---
+id: net-nmap-generic
+name: Open Ports Detected (Generic)
+target_type: network
+author: official
+os_packages:
+  arch: [nmap]
+  debian: [nmap]
+  kali: [nmap]
+match:
+  logic: all
+  rules:
+    - regex: "\\b\\d{1,5}/tcp\\b"
+    - contains: "open"
+tactics:
+  phase: "Network Enumeration"
+  priority: 10
+  next_step: "Run a focused service/version and default-script scan against the discovered open ports."
+  tools:
+    - name: nmap deep scan
+      binary: nmap
+      command: "nmap -sVC -p {target_port} {target_ip}"
+      purpose: "Service/version detection plus default NSE scripts on open ports."

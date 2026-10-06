@@ -1,0 +1,144 @@
+# Digital Forensics & Incident Response plugins.
+# Triggered by journalctl / log output, file hashes, and suspicious artifacts.
+---
+id: dfir-failed-auth
+name: Authentication Failures in Logs
+target_type: host
+author: official
+os_packages:
+  arch: [fail2ban]
+  debian: [fail2ban]
+  kali: [fail2ban]
+match:
+  logic: any
+  rules:
+    - regex: "Failed password for"
+    - regex: "authentication failure"
+    - regex: "Invalid user"
+tactics:
+  phase: "Incident Response (Access)"
+  priority: 60
+  next_step: "Correlate the source IPs and accounts, determine if any attempt succeeded, then contain the source."
+  tools:
+    - name: journalctl ssh
+      binary: journalctl
+      command: "journalctl -u ssh --since '-24h' | grep -Ei 'accepted|failed'"
+      purpose: "Separate successful from failed logins in the last day."
+    - name: fail2ban-client
+      binary: fail2ban-client
+      command: "fail2ban-client set sshd banip {target_ip}"
+      purpose: "Ban the offending source IP immediately."
+    - name: lastb
+      binary: lastb
+      command: "lastb -a | head -n 50"
+      purpose: "Review recent bad login attempts with source hosts."
+---
+id: dfir-privilege-escalation
+name: Privilege Escalation / sudo Activity
+target_type: host
+author: official
+os_packages:
+  arch: [audit]
+  debian: [auditd]
+  kali: [auditd]
+match:
+  logic: any
+  rules:
+    - regex: "sudo:.*COMMAND="
+    - regex: "session opened for user root"
+    - contains: "pam_unix(sudo:session)"
+tactics:
+  phase: "Incident Response (Privilege)"
+  priority: 55
+  next_step: "Review which users invoked root and what commands ran; flag anything outside normal change windows."
+  tools:
+    - name: journalctl sudo
+      binary: journalctl
+      command: "journalctl _COMM=sudo --since '-24h'"
+      purpose: "Review all sudo invocations in the last day."
+    - name: ausearch
+      binary: ausearch
+      command: "ausearch -m USER_CMD --start recent"
+      purpose: "Pull executed commands from the audit log."
+---
+id: dfir-malware-hash
+name: File Hash Present (Reputation Check)
+target_type: artifact
+author: official
+os_packages:
+  arch: [yara]
+  debian: [yara]
+  kali: [yara]
+match:
+  logic: any
+  rules:
+    - entity_type: hash
+tactics:
+  phase: "Malware Triage"
+  priority: 20
+  next_step: "Check the hash against threat-intel sources and scan the sample with YARA before any dynamic analysis."
+  tools:
+    - name: vt lookup (manual)
+      binary: curl
+      command: "curl -s 'https://www.virustotal.com/gui/file/{target_hash}'"
+      purpose: "Open the hash's reputation page (requires a VT account/API for programmatic use)."
+    - name: yara
+      binary: yara
+      command: "yara -r /usr/share/yara-rules/ {target}"
+      purpose: "Scan the artifact against known malware signatures."
+---
+id: dfir-oom-kernel
+name: Kernel OOM / Hardware Errors
+target_type: host
+author: official
+os_packages:
+  arch: [util-linux]
+  debian: [util-linux]
+  kali: [util-linux]
+match:
+  logic: any
+  rules:
+    - contains: "Out of memory"
+    - regex: "oom-killer|Killed process"
+    - regex: "Hardware Error|mce:"
+tactics:
+  phase: "Host Health Triage"
+  priority: 25
+  next_step: "Identify the process(es) killed and whether this is resource exhaustion, a leak, or failing hardware."
+  tools:
+    - name: journalctl kernel
+      binary: journalctl
+      command: "journalctl -k -p err --since '-6h'"
+      purpose: "Show recent kernel-level error messages."
+    - name: dmesg
+      binary: dmesg
+      command: "dmesg -T --level=err,crit"
+      purpose: "Review timestamped kernel errors and the OOM report."
+---
+id: dfir-service-crash
+name: Service Crash / Segfault
+target_type: host
+author: official
+os_packages:
+  arch: [systemd-coredump, gdb]
+  debian: [systemd-coredump, gdb]
+  kali: [systemd-coredump, gdb]
+match:
+  logic: any
+  rules:
+    - regex: "segfault at [0-9a-f]+"
+    - contains: "core dumped"
+    - regex: "Main process exited.*status=[0-9]+/"
+tactics:
+  phase: "Crash / Stability Triage"
+  priority: 30
+  next_step: "Pull the recorded core dump for the crashing service and inspect the faulting frame."
+  tools:
+    - name: coredumpctl
+      binary: coredumpctl
+      command: "coredumpctl list"
+      purpose: "List captured core dumps to pick the relevant crash."
+    - name: coredumpctl gdb
+      binary: coredumpctl
+      command: "coredumpctl gdb"
+      purpose: "Open the most recent core dump directly in gdb."

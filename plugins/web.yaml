@@ -1,0 +1,133 @@
+# Web / application-layer plugins.
+# Triggered by curl header dumps, whatweb output, nmap http service banners.
+---
+id: web-http-service
+name: HTTP/HTTPS Service Detected
+target_type: web
+author: official
+os_packages:
+  arch: [nikto, gobuster, feroxbuster, whatweb]
+  debian: [nikto, gobuster, feroxbuster, whatweb]
+  kali: [nikto, gobuster, feroxbuster, whatweb]
+match:
+  logic: any
+  rules:
+    - regex: "HTTP/[0-9.]+ [0-9]{3}"
+    - regex: "Server: "
+    - regex: "\\b(80|443|8080|8443)/tcp\\b.*http"
+tactics:
+  phase: "Web Reconnaissance"
+  priority: 50
+  next_step: "Fingerprint the stack, then enumerate directories and known vulnerabilities before touching parameters."
+  tools:
+    - name: whatweb
+      binary: whatweb
+      command: "whatweb -a 3 {target_url}"
+      purpose: "Aggressive technology fingerprinting (CMS, framework, server)."
+    - name: feroxbuster
+      binary: feroxbuster
+      command: "feroxbuster -u {target_url} -w /usr/share/wordlists/dirb/common.txt"
+      purpose: "Recursive content/directory discovery."
+    - name: nikto
+      binary: nikto
+      command: "nikto -host {target_url}"
+      purpose: "Scan for known server misconfigurations and dated vulnerabilities."
+---
+id: web-wordpress
+name: WordPress Application
+target_type: web
+author: official
+os_packages:
+  arch: [wpscan]
+  debian: [wpscan]
+  kali: [wpscan]
+match:
+  logic: any
+  rules:
+    - contains: "wp-content"
+    - contains: "wp-json"
+    - regex: "X-Powered-By:.*WordPress"
+tactics:
+  phase: "Web Exploitation (CMS)"
+  priority: 70
+  next_step: "Enumerate plugins, themes, and users with WPScan; weak plugins are the usual entry point."
+  tools:
+    - name: wpscan
+      binary: wpscan
+      command: "wpscan --url {target_url} --enumerate vp,vt,u --random-user-agent"
+      purpose: "Enumerate vulnerable plugins/themes and usernames."
+---
+id: web-git-exposed
+name: Exposed .git Directory
+target_type: web
+author: official
+os_packages:
+  arch: [git]
+  debian: [git]
+  kali: [git]
+match:
+  logic: any
+  rules:
+    - contains: "/.git/"
+    - contains: "[core]"
+    - regex: "ref: refs/heads"
+tactics:
+  phase: "Source Disclosure"
+  priority: 85
+  next_step: "A reachable .git tree usually means full source recovery - dump it and review for secrets and logic flaws."
+  tools:
+    - name: git-dumper
+      binary: git-dumper
+      command: "git-dumper {target_url}/.git ./dumped-src"
+      purpose: "Reconstruct the repository from an exposed .git directory."
+    - name: trufflehog
+      binary: trufflehog
+      command: "trufflehog filesystem ./dumped-src"
+      purpose: "Scan the recovered source for committed secrets."
+---
+id: web-api-swagger
+name: API / Swagger Documentation
+target_type: web
+author: official
+os_packages:
+  arch: [jq, curl]
+  debian: [jq, curl]
+  kali: [jq, curl]
+match:
+  logic: any
+  rules:
+    - contains: "swagger"
+    - contains: "openapi"
+    - contains: "application/json"
+tactics:
+  phase: "API Testing"
+  priority: 40
+  next_step: "Map every documented endpoint, then probe authN/authZ and mass-assignment on each."
+  tools:
+    - name: curl
+      binary: curl
+      command: "curl -s {target_url} | jq ."
+      purpose: "Pretty-print the API/spec response for manual review."
+---
+id: web-waf-detected
+name: WAF / CDN In Front
+target_type: web
+author: official
+os_packages:
+  arch: [wafw00f]
+  debian: [wafw00f]
+  kali: [wafw00f]
+match:
+  logic: any
+  rules:
+    - regex: "Server:.*cloudflare"
+    - regex: "X-Sucuri-ID|X-CDN|cf-ray"
+tactics:
+  phase: "Evasion Planning"
+  priority: 30
+  next_step: "Identify the WAF/CDN, then find the origin IP before spending time on payload tuning."
+  tools:
+    - name: wafw00f
+      binary: wafw00f
+      command: "wafw00f {target_url}"
+      purpose: "Identify the specific WAF product in front of the app."
