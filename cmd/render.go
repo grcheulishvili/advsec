@@ -23,20 +23,29 @@ func renderText(w io.Writer, r *engine.Report, activeCtx string, format engine.F
 	color := !flagNoColor && isTTY(w)
 	s := newStyles(color)
 
+	intent := engine.InferIntent(r.Context)
+	activeDomain := resolveActiveDomain(activeCtx, format, r)
+
 	// ---- header box ----
-	ctxLabel := "ALL DOMAINS"
-	if activeCtx != "" {
-		ctxLabel = strings.ToUpper(activeCtx)
+	domLabel := "ALL DOMAINS"
+	if activeDomain != "" {
+		domLabel = strings.ToUpper(activeDomain)
 	} else if format != "" && format != engine.FormatText && engine.FormatRestricts(format) {
-		// No explicit context but the format scoped us — reflect that.
-		ctxLabel = strings.ToUpper(string(format))
+		domLabel = strings.ToUpper(string(format))
+	}
+	seqMode := "Linear"
+	if intent != engine.IntentNone {
+		seqMode = "Intent-ordered"
 	}
 	osLabel := orUnknown(r.Host.PrettyName)
-	header := fmt.Sprintf("%s │ %s (%s) │ Context: [%s]",
-		s.brand.Render("ADVSEC"), osLabel, r.Host.Manager.Name, s.ctx.Render(ctxLabel))
+	header := fmt.Sprintf("%s │ %s (%s) │ Domain: [%s] │ Sequence: %s",
+		s.brand.Render("ADVSEC"), osLabel, r.Host.Manager.Name, s.ctx.Render(domLabel), seqMode)
 	fmt.Fprintln(w, s.box.Render(header))
 	if format != "" && format != engine.FormatText {
 		fmt.Fprintf(w, "%s %s\n", s.label.Render("Input Format:   "), s.value.Render(string(format)))
+	}
+	if intent != engine.IntentNone {
+		fmt.Fprintf(w, "%s %s\n", s.label.Render("Inferred Intent:"), s.ctx.Render(string(intent)))
 	}
 
 	// ---- target artifact ----
@@ -57,7 +66,54 @@ func renderText(w io.Writer, r *engine.Report, activeCtx string, format engine.F
 		return
 	}
 
-	// ---- recommendations ----
+	if flagFlat {
+		renderFlat(w, s, r)
+	} else {
+		renderSequenced(w, s, r, activeDomain, intent)
+	}
+
+	// ---- smart (non-intrusive) context suggestion ----
+	if activeCtx == "" {
+		suggestContext(r.Recommendations)
+	}
+}
+
+// renderSequenced groups every recommended tool into ordered action-chain
+// phases (non-destructive triage first), honoring explicit step/phase_label
+// tags and the inferred intent.
+func renderSequenced(w io.Writer, s styles, r *engine.Report, activeDomain string, intent engine.Intent) {
+	seq := engine.BuildSequence(r, activeDomain, intent)
+	mixed := activeDomain == ""
+	for _, ph := range seq.Phases {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, s.title.Render("["+ph.Label+"]"))
+		fmt.Fprintln(w, s.rule.Render(strings.Repeat("─", 74)))
+		for _, st := range ph.Tools {
+			t := st.Tool
+			mark := s.ok.Render("✔")
+			status := s.okDim.Render("(installed)")
+			if !t.Installed {
+				mark = s.miss.Render("✖")
+				status = s.missDim.Render("(missing)")
+			}
+			fmt.Fprintf(w, "%s %s %s %s\n", mark,
+				s.index.Render(fmt.Sprintf("%d.", st.Step)), s.toolName.Render(t.Name), status)
+			if t.Command != "" {
+				fmt.Fprintln(w, "     "+s.cmd.Render("$ "+t.Command))
+			}
+			if t.Purpose != "" {
+				fmt.Fprintln(w, "     "+s.label.Render("Purpose:")+" "+s.dim.Render(t.Purpose))
+			}
+			if mixed && t.Source != "" {
+				fmt.Fprintln(w, "     "+s.dim.Render("(from: "+t.Source+")"))
+			}
+			renderAssetAndInstall(w, s, t, "     ")
+		}
+	}
+}
+
+// renderFlat is the previous per-plugin layout (via --flat).
+func renderFlat(w io.Writer, s styles, r *engine.Report) {
 	for i, rec := range r.Recommendations {
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "%s %s\n", s.index.Render(fmt.Sprintf("[%d]", i+1)), s.title.Render(rec.Name))
@@ -70,11 +126,30 @@ func renderText(w io.Writer, r *engine.Report, activeCtx string, format engine.F
 			renderTool(w, s, t)
 		}
 	}
+}
 
-	// ---- smart (non-intrusive) context suggestion ----
-	if activeCtx == "" {
-		suggestContext(r.Recommendations)
+// resolveActiveDomain picks the single domain a report represents, or "" when
+// it spans several (mixed output).
+func resolveActiveDomain(activeCtx string, format engine.Format, r *engine.Report) string {
+	if activeCtx != "" {
+		return activeCtx
 	}
+	if ds := engine.ScopeDomainsForFormat(format); len(ds) == 1 {
+		return ds[0]
+	}
+	dom := ""
+	for _, rec := range r.Recommendations {
+		d := rec.Domain
+		if d == "" || d == "general" {
+			continue
+		}
+		if dom == "" {
+			dom = d
+		} else if dom != d {
+			return ""
+		}
+	}
+	return dom
 }
 
 func renderTool(w io.Writer, s styles, t engine.ToolRec) {
@@ -89,18 +164,24 @@ func renderTool(w io.Writer, s styles, t engine.ToolRec) {
 	if t.Purpose != "" {
 		fmt.Fprintln(w, "  "+s.label.Render("Purpose:")+" "+s.dim.Render(t.Purpose))
 	}
+	renderAssetAndInstall(w, s, t, "  ")
+}
+
+// renderAssetAndInstall prints a tool's asset notes and install line at a given
+// indent, shared by the flat and sequenced renderers.
+func renderAssetAndInstall(w io.Writer, s styles, t engine.ToolRec, indent string) {
 	for _, n := range t.AssetNotes {
 		if n.Substituted != "" {
-			fmt.Fprintln(w, "  "+s.okDim.Render("[i] Using detected asset: "+n.Substituted))
+			fmt.Fprintln(w, indent+s.okDim.Render("[i] Using detected asset: "+n.Substituted))
 		} else {
-			fmt.Fprintln(w, "  "+s.warn.Render("[!] Missing Asset: "+n.Path))
+			fmt.Fprintln(w, indent+s.warn.Render("[!] Missing Asset: "+n.Path))
 			if n.Tip != "" {
-				fmt.Fprintln(w, "      "+s.install.Render("Install: "+n.Tip))
+				fmt.Fprintln(w, indent+"    "+s.install.Render("Install: "+n.Tip))
 			}
 		}
 	}
 	if !t.Installed && t.InstallCommand != "" {
-		fmt.Fprintln(w, "  "+s.install.Render("Install: "+t.InstallCommand))
+		fmt.Fprintln(w, indent+s.install.Render("Install: "+t.InstallCommand))
 	}
 }
 

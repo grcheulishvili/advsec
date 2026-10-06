@@ -120,6 +120,8 @@ var fileyTLDs = map[string]bool{
 	"c": true, "h": true, "o": true, "a": true, "yaml": true, "yml": true,
 	"json": true, "txt": true, "log": true, "conf": true, "cfg": true,
 	"exe": true, "dll": true, "bin": true, "dat": true, "db": true,
+	"elf": true, "img": true, "iso": true, "dmp": true, "raw": true,
+	"pcap": true, "pcapng": true, "eml": true, "msg": true, "apk": true,
 }
 
 // Parse reads up to MaxBufferBytes from r and returns a populated Context.

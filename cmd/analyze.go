@@ -180,6 +180,8 @@ type jsonTool struct {
 	Binary         string          `json:"binary"`
 	Installed      bool            `json:"installed"`
 	InstallCommand string          `json:"install_command,omitempty"`
+	Step           int             `json:"step,omitempty"`
+	PhaseLabel     string          `json:"phase_label,omitempty"`
 	AssetNotes     []jsonAssetNote `json:"asset_notes,omitempty"`
 }
 
@@ -228,6 +230,7 @@ func emitJSON(r *engine.Report, activeCtx string, format engine.Format) error {
 			jt := jsonTool{
 				Name: t.Name, Purpose: t.Purpose, Command: t.Command,
 				Binary: t.Binary, Installed: t.Installed, InstallCommand: t.InstallCommand,
+				Step: t.Step, PhaseLabel: t.PhaseLabel,
 			}
 			for _, n := range t.AssetNotes {
 				jt.AssetNotes = append(jt.AssetNotes, jsonAssetNote{Path: n.Path, Substituted: n.Substituted, Tip: n.Tip})

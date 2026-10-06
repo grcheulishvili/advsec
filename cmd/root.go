@@ -12,7 +12,7 @@ import (
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "0.4.0"
+	Version = "0.5.0"
 	Commit  = "dev"
 	Date    = "unknown"
 )
@@ -30,6 +30,7 @@ var (
 	flagAll        bool
 	flagNoClassify bool
 	flagFormat     string
+	flagFlat       bool
 )
 
 var rootCmd = &cobra.Command{
@@ -91,4 +92,5 @@ func addAnalyzeFlags(fs *pflag.FlagSet) {
 	fs.BoolVarP(&flagAll, "all", "a", false, "show every match regardless of confidence (min-confidence=0)")
 	fs.BoolVar(&flagNoClassify, "no-classify", false, "disable magic-byte format gating (evaluate all domains)")
 	fs.StringVar(&flagFormat, "format", "", "force the input format (e.g. email/mime, binary/elf) instead of auto-detecting")
+	fs.BoolVar(&flagFlat, "flat", false, "render a flat per-plugin list instead of phase-grouped action chains")
 }

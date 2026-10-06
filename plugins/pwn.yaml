@@ -21,17 +21,23 @@ tactics:
   tools:
     - name: "checksec"
       binary: "checksec"
+      step: 1
+      phase_label: "Phase 1: Binary Identification & Mitigations"
       command: "checksec --file={target}"
       purpose: "Enumerate RELRO, Stack Canary, NX, PIE, and Fortify."
+    - name: "gdb + pwndbg"
+      binary: "gdb"
+      step: 3
+      phase_label: "Phase 3: Dynamic Instrumentation"
+      command: "gdb -q {target}"
+      purpose: "Dynamic analysis; cyclic/pattern to locate the offset."
     - name: "pwntools template"
       binary: "pwn"
+      step: 4
+      phase_label: "Phase 4: Exploit Generation / Patching"
       command: "pwn template {target} > exploit.py"
       purpose: "Generate an exploit-script skeleton wired to the target."
       install: "pipx install pwntools"
-    - name: "gdb + pwndbg"
-      binary: "gdb"
-      command: "gdb -q {target}"
-      purpose: "Dynamic analysis; cyclic/pattern to locate the offset."
 ---
 id: pwn-no-canary
 name: "ELF without Stack Canary"

@@ -83,4 +83,11 @@ type Tool struct {
 	// fallback preferred over guessing a distro package name for tools that
 	// ship only via pip/pipx/go/cargo or a vendor script.
 	Install string `yaml:"install"`
+	// Step is the explicit 1-based position of this tool in the operational
+	// action-chain (1 = earliest/most passive). 0 means "infer it".
+	Step int `yaml:"step"`
+	// PhaseLabel is an explicit human-readable phase heading for this tool
+	// (e.g. "Phase 1: Header & Mitigation Audit"). Empty = derive from the
+	// domain's standard execution sequence.
+	PhaseLabel string `yaml:"phase_label"`
 }

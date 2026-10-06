@@ -16,21 +16,39 @@ match:
 tactics:
   phase: "Reverse Engineering (triage)"
   priority: 20
-  next_step: "Start with strings and symbols, then load into a disassembler for control-flow analysis."
+  next_step: "Identify the binary and its mitigations, extract static symbols, then move to dynamic debugging."
   tools:
-    - name: "rabin2 info"
+    - name: "file & checksec"
+      binary: "checksec"
+      step: 1
+      phase_label: "Phase 1: Binary Identification & Mitigations"
+      command: "file {target} ; checksec --file={target}"
+      purpose: "Verify architecture and active security mitigations (RELRO/NX/PIE/Canary)."
+    - name: "rabin2"
       binary: "rabin2"
-      command: "rabin2 -I {target} ; rabin2 -z {target}"
-      purpose: "Header metadata plus data-section strings."
+      step: 2
+      phase_label: "Phase 2: Static Analysis"
+      command: "rabin2 -I {target} ; rabin2 -i {target} ; rabin2 -z {target}"
+      purpose: "Header metadata, imports, and data-section strings."
     - name: "radare2"
       binary: "r2"
+      step: 2
+      phase_label: "Phase 2: Static Analysis"
       command: "r2 -AA {target}"
       purpose: "Auto-analyze functions, xrefs, and strings."
     - name: "ghidra"
       binary: "ghidra"
+      step: 2
+      phase_label: "Phase 2: Static Analysis"
       command: "ghidraRun"
       purpose: "Full decompilation in the Ghidra SRE suite."
       install: "pacman -S ghidra  # or apt install ghidra (kali)"
+    - name: "gdb"
+      binary: "gdb"
+      step: 3
+      phase_label: "Phase 3: Dynamic Instrumentation"
+      command: "gdb -q {target}"
+      purpose: "Inspect functions, disassembly, and runtime memory."
 ---
 id: rev-upx-packed
 name: "UPX-Packed Executable"

@@ -22,14 +22,20 @@ tactics:
   tools:
     - name: "whatweb"
       binary: "whatweb"
+      step: 1
+      phase_label: "Phase 1: Passive Recon & Fingerprinting"
       command: "whatweb -a 3 {target_url}"
       purpose: "Aggressive technology fingerprinting."
     - name: "feroxbuster"
       binary: "feroxbuster"
+      step: 2
+      phase_label: "Phase 2: Endpoint / Parameter Discovery"
       command: "feroxbuster -u {target_url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt"
       purpose: "Recursive content discovery."
     - name: "nuclei"
       binary: "nuclei"
+      step: 3
+      phase_label: "Phase 3: Targeted Vulnerability Verification"
       command: "nuclei -u {target_url}"
       purpose: "Template-driven vulnerability scan."
       install: "go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"

@@ -62,11 +62,30 @@ Piping into `advsec` runs the analyzer (the default command):
 | `-a, --all` | Show every match regardless of confidence |
 | `--no-classify` | Disable magic-byte format gating (evaluate all domains) |
 | `--format <fmt>` | Force the input format (e.g. `email/mime`, `binary/elf`) |
+| `--flat` | Flat per-plugin list instead of phase-grouped action chains |
 | `--top N` | Show only the N highest-priority recommendations |
 | `--missing-only` | Only show tools not installed locally (plus their install command) |
 | `--json` | Machine-readable output (includes `domain` and `confidence`) |
 | `--no-color` | Disable ANSI styling |
 | `-f, --input FILE` | Read from a file instead of stdin |
+
+### Action-chain sequencing
+
+Recommendations are rendered as an ordered **action chain**, not a flat list:
+tools are grouped under phase headers and sorted non-destructively (passive
+triage → enumeration → active/exploit → remediation). Each domain has its own
+standard sequence (e.g. reversing: *Identify → Static → Dynamic → Exploit*;
+DFIR: *Triage → Containment → Forensics → Remediation*). Plugins can pin a
+tool's place with `step:` and `phase_label:`; otherwise the step is inferred
+from the command.
+
+advsec also infers an **intent** from the payload and reorders accordingly:
+
+- a lone hash → *Reputation & IOC Search* (threat-intel lookups before cracking)
+- a crash / core dump → *Post-Mortem Triage* (stack trace before disassembly)
+- a log stream with active failures → *Immediate Containment* (isolation first)
+
+Use `--flat` for the previous per-plugin layout.
 
 ### Format classification
 
@@ -225,7 +244,7 @@ advsec/
 ├── main.go
 ├── cmd/            root, analyze, plugin, init commands + render/select (cobra)
 ├── pkg/
-│   ├── engine/     parser, matcher, evaluator
+│   ├── engine/     parser, classifier, matcher, evaluator, sequence, assets
 │   ├── osdetect/   distro detection + package manager mapping
 │   └── plugin/     YAML types, loader, lifecycle manager
 ├── plugins/        125+ rules across 15 domain files (see below)

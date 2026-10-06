@@ -19,6 +19,14 @@ type ToolRec struct {
 	// AssetNotes carries warnings/substitutions for hardcoded asset paths
 	// (e.g. a missing /usr/share/wordlists/rockyou.txt).
 	AssetNotes []AssetNote
+	// Domain is the source plugin's domain (for sequencing + source tags).
+	Domain string
+	// Step / PhaseLabel are the explicit action-chain hints from the plugin
+	// (0 / "" when not specified; the sequencer then infers them).
+	Step       int
+	PhaseLabel string
+	// Source is the name of the plugin this tool came from.
+	Source string
 }
 
 // Recommendation is a matched plugin rendered into actionable output for a
@@ -97,6 +105,10 @@ func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) To
 		Binary:     binary,
 		Installed:  installed,
 		AssetNotes: notes,
+		Domain:     p.Domain,
+		Step:       t.Step,
+		PhaseLabel: t.PhaseLabel,
+		Source:     p.Name,
 	}
 	if !installed {
 		tr.InstallCommand = e.installCommandFor(p, t, binary)
