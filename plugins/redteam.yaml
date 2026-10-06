@@ -40,7 +40,7 @@ os_packages:
 match:
   logic: any
   rules:
-    - regex: 'servicePrincipalName|SPN|MSSQLSvc|HTTP/|CIFS/|krbtgt|\$krb5tgs\$'
+    - regex: 'servicePrincipalName|\bSPN\b|MSSQLSvc/|HTTP/[A-Za-z]|CIFS/|krbtgt|\$krb5tgs\$'
 tactics:
   phase: "Active Directory (Credential Access)"
   priority: 72

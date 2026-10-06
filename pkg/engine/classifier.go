@@ -62,6 +62,9 @@ var (
 	rePowerShell = regexp.MustCompile(`(?m)\$env:|Invoke-[A-Z]|-[Ee]ncodedCommand|\[System\.[A-Za-z]|\[Ref\]\.Assembly|\bIEX\b|New-Object\s+Net\.WebClient`)
 	reJavaScript = regexp.MustCompile(`(?m)function\s*\(|=>|document\.(cookie|write|location)|window\[|window\.|eval\(|_0x[0-9a-fA-F]{2,}|console\.log|require\(|module\.exports|atob\(`)
 	reShellBang  = regexp.MustCompile(`(?m)^#!\s*/(bin|usr/bin)/`)
+	// reFileOut recognizes `file`-command textual output ("name: ELF 64-bit...")
+	// so a description of a binary scopes like the binary itself.
+	reFileOut = regexp.MustCompile(`(?im):\s+(ELF (?:32|64)-bit|PE32\+? executable|Mach-O (?:64-bit|universal|executable))`)
 	// reAdvsecOut recognizes advsec's own banner, phase headers, and help page.
 	reAdvsecOut = regexp.MustCompile(`(?m)ADVSEC\s*\xe2\x94\x82|ADVSEC \||\[Phase \d|Usage:\s+advsec|advsec reads piped stdin|Tactical Objective:|Inferred Intent:`)
 )
@@ -119,6 +122,17 @@ func Classify(raw string) Format {
 	// Access logs look superficially code-ish; classify them before code.
 	if reAccessLog.MatchString(head) {
 		return FormatLog
+	}
+	// `file`-command output describing a binary scopes like that binary.
+	if m := reFileOut.FindStringSubmatch(head); m != nil {
+		switch {
+		case strings.HasPrefix(m[1], "ELF"):
+			return FormatELF
+		case strings.HasPrefix(m[1], "PE32"):
+			return FormatPE
+		case strings.HasPrefix(m[1], "Mach-O"):
+			return FormatMachO
+		}
 	}
 	// Wordlists / payload lists / path lists must be detected BEFORE code
 	// heuristics, since a list of `<script>` payloads would otherwise look like
@@ -199,7 +213,7 @@ func formatScope(f Format) (allowed map[string]bool, ok bool) {
 
 var (
 	rePathish    = regexp.MustCompile(`(?i)^/(etc|var|proc|sys|home|usr|opt|tmp|root|boot|dev|run)/|^/[a-z0-9._-]+/|\.(x?log|conf|cfg|pid|sock)$|/var/log`)
-	rePayXSS     = regexp.MustCompile(`(?i)<script|onerror=|onload=|<img|<svg|javascript:|alert\(|document\.cookie`)
+	rePayXSS     = regexp.MustCompile(`(?i)<script|onerror=|onload=|<img\s|<svg|javascript:|alert\(|<iframe`)
 	rePaySQLi    = regexp.MustCompile(`(?i)union\s+select|'\s*or\s|"\s*or\s|or\s+1=1|sleep\(|benchmark\(|information_schema|'--|waitfor\s+delay`)
 	rePayTrav    = regexp.MustCompile(`(?i)\.\./|\.\.\\|%2e%2e|/etc/passwd|\.\.%2f|php://|file://|/proc/self/environ`)
 	rePayCmdi    = regexp.MustCompile(`(?i);\s*id\b|\|\s*id\b|\$\(|` + "`" + `|;\s*ls\b|\|\s*whoami|&&\s*cat\s`)
@@ -253,8 +267,11 @@ func detectListFormat(raw string) Format {
 	if total < 3 {
 		return ""
 	}
-	// Multi-category payloads, or a payload-heavy stream -> payload collection.
-	if len(cats) >= 2 || payloadLines*100 >= total*30 {
+	// Multi-category payloads, or a stream dominated by payload lines, is a
+	// payload collection. A single incidental payload-ish line (common in real
+	// code) is not enough: require >=2 distinct categories, or >=2 payload
+	// lines forming a clear majority.
+	if len(cats) >= 2 || (payloadLines >= 2 && payloadLines*100 >= total*40) {
 		return FormatPayloadList
 	}
 	if pathLines*100 >= total*60 {

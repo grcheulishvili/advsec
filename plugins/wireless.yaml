@@ -41,7 +41,7 @@ os_packages:
 match:
   logic: any
   rules:
-    - regex: 'BSSID|ESSID|airodump-ng|WPA2|WEP|PWR\s+Beacons|CH\s+[0-9]+\s+'
+    - regex: '\bBSSID\b|\bESSID\b|airodump-ng|\bWPA2\b|\bWEP\b|PWR\s+Beacons|\bCH\s+[0-9]+\s'
 tactics:
   phase: "Wireless (Recon)"
   priority: 40
@@ -63,7 +63,7 @@ os_packages:
 match:
   logic: any
   rules:
-    - regex: 'bluetooth|hci[0-9]|BD_ADDR|[0-9A-F]{2}(:[0-9A-F]{2}){5}.*(LE|BR/EDR)|BLE'
+    - regex: '\bbluetooth\b|\bhci[0-9]\b|\bBD_ADDR\b|\b[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}\b|\bBLE\b'
 tactics:
   phase: "Wireless (Bluetooth)"
   priority: 35
