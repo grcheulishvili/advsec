@@ -65,6 +65,8 @@ var (
 	// reFileOut recognizes `file`-command textual output ("name: ELF 64-bit...")
 	// so a description of a binary scopes like the binary itself.
 	reFileOut = regexp.MustCompile(`(?im):\s+(ELF (?:32|64)-bit|PE32\+? executable|Mach-O (?:64-bit|universal|executable))`)
+	// reFileArchive recognizes `file`-command output for archives.
+	reFileArchive = regexp.MustCompile(`(?im):\s+.*?(Zip archive data|gzip compressed|POSIX tar|tar archive|7-zip archive|RAR archive|bzip2 compressed|XZ compressed|Microsoft Cabinet)`)
 	// reAdvsecOut recognizes advsec's own banner, phase headers, and help page.
 	reAdvsecOut = regexp.MustCompile(`(?m)ADVSEC\s*\xe2\x94\x82|ADVSEC \||\[Phase \d|Usage:\s+advsec|advsec reads piped stdin|Tactical Objective:|Inferred Intent:`)
 )
@@ -132,6 +134,19 @@ func Classify(raw string) Format {
 			return FormatPE
 		case strings.HasPrefix(m[1], "Mach-O"):
 			return FormatMachO
+		}
+	}
+	// `file`-command output describing an archive scopes as that archive, so a
+	// described archive gets extraction tools while a text list never does.
+	if m := reFileArchive.FindStringSubmatch(head); m != nil {
+		a := strings.ToLower(m[1])
+		switch {
+		case strings.Contains(a, "gzip"):
+			return FormatGzip
+		case strings.Contains(a, "7-zip"):
+			return Format7z
+		default:
+			return FormatZip
 		}
 	}
 	// Wordlists / payload lists / path lists must be detected BEFORE code

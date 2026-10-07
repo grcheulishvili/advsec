@@ -103,6 +103,32 @@ func fuzzCorpus() []fuzzSample {
 	}
 }
 
+// TestPayloadList_NoArchiveLeakage ensures a plain-text payload list (even one
+// whose lines mention ".zip"/"tar.gz") never surfaces archive extraction tools.
+func TestPayloadList_NoArchiveLeakage(t *testing.T) {
+	plugins := plugin.LoadFromDirs([]string{"../../plugins"}).Plugins
+	in := "<script>alert(1)</script>\n' OR '1'='1' --\n../../../etc/passwd\nbackup.tar.gz\nsite.zip\nadmin\npassword\n"
+	ctx := ParseString(in)
+	if ctx.Format != FormatPayloadList {
+		t.Fatalf("format = %q, want text/payload_list", ctx.Format)
+	}
+	scoped := FilterByFormat(plugins, ctx.Format)
+	matches := NewMatcher(scoped).Evaluate(ctx)
+	report := NewEvaluator(fuzzHost()).Evaluate(ctx, matches)
+	for _, rec := range report.Recommendations {
+		if rec.Domain == "archive" || strings.Contains(strings.ToLower(rec.PluginID), "archive") {
+			t.Errorf("archive plugin %q leaked into payload list", rec.PluginID)
+		}
+		for _, tool := range rec.Tools {
+			for _, bad := range []string{"7z ", "7za ", "tar tf", "tar xf", "unzip", "unrar"} {
+				if strings.Contains(tool.Command, bad) {
+					t.Errorf("archive command %q leaked (tool %q, rule %s)", bad, tool.Name, rec.PluginID)
+				}
+			}
+		}
+	}
+}
+
 func fuzzHost() osdetect.HostInfo {
 	return osdetect.HostInfo{Family: osdetect.FamilyDebian,
 		Manager: osdetect.PackageManager{Name: "apt", InstallTemplate: "sudo apt install -y %s"}}

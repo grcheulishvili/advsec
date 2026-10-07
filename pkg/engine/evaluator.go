@@ -78,8 +78,15 @@ func (e *Evaluator) Evaluate(ctx *Context, matches []Match) *Report {
 	listStream := IsListFormat(ctx.Format)
 
 	for _, m := range matches {
-		if listStream && m.Plugin.Domain != "general" {
-			continue
+		if listStream {
+			// On list streams, only general-domain triage applies, and archive
+			// extraction rules are never relevant to a text list.
+			if m.Plugin.Domain != "general" {
+				continue
+			}
+			if m.Plugin.TargetType == "archive" || m.Plugin.Domain == "archive" {
+				continue
+			}
 		}
 		rec := Recommendation{
 			PluginID:   m.Plugin.ID,

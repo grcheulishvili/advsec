@@ -12,7 +12,7 @@ import (
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "1.2.0"
+	Version = "1.2.1"
 	Commit  = "dev"
 	Date    = "unknown"
 )

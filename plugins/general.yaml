@@ -3,16 +3,22 @@
 ---
 id: gen-archive
 name: "Compressed Archive"
-target_type: general
+target_type: archive
+domain: general
 author: official
 os_packages:
   arch: [p7zip, tar, unzip]
   debian: [p7zip-full, tar, unzip]
   kali: [p7zip-full, tar, unzip]
+# Archive extraction is gated on an actual archive/binary stream (magic bytes
+# or `file`-command output), never raw text. This stops wordlists and payload
+# lists that merely mention ".zip"/"tar" from triggering 7z/tar recommendations.
 match:
   logic: any
   rules:
-    - regex: '(Zip|gzip|XZ|bzip2|7-zip|RAR|tar) (archive|compressed)|\.(zip|tar\.gz|tgz|tar\.xz|7z|rar|bz2)\b'
+    - format: "archive/zip"
+    - format: "archive/gzip"
+    - format: "archive/7z"
 tactics:
   phase: "General (Archive)"
   priority: 12
