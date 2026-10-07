@@ -12,7 +12,7 @@ import (
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "1.3.0"
+	Version = "1.4.0"
 	Commit  = "dev"
 	Date    = "unknown"
 )
@@ -32,6 +32,7 @@ var (
 	flagFormat     string
 	flagFlat       bool
 	flagSemantic   bool
+	flagCmd        string
 )
 
 var rootCmd = &cobra.Command{
@@ -109,4 +110,5 @@ func addAnalyzeFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&flagFlat, "flat", false, "render a flat per-plugin list instead of phase-grouped action chains")
 	fs.BoolVar(&flagSemantic, "semantic", false, "enable optional local embedding-based semantic classification (requires 'advsec setup-semantic')")
 	fs.BoolVar(&flagSemantic, "embedding", false, "alias for --semantic")
+	fs.StringVar(&flagCmd, "cmd", "", "upstream command line to fuse (auto-detected from the pipe when omitted)")
 }

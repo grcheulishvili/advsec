@@ -36,6 +36,7 @@ const (
 	EntityCVE     EntityKind = "cve"
 	EntityEmail   EntityKind = "email"
 	EntityGPGKey  EntityKind = "gpg_key"
+	EntityPath    EntityKind = "path"
 )
 
 // Context is the structured view of a chunk of piped input. It carries both
@@ -54,6 +55,17 @@ type Context struct {
 	ExternalTarget bool
 	// Entities maps an EntityKind to the ordered, deduplicated values found.
 	Entities map[EntityKind][]string
+
+	// UpstreamCmd is the resolved command line of the process that produced
+	// this input (auto-detected via /proc, or from ADVSEC_CMD / --cmd). Empty
+	// when no upstream command could be determined.
+	UpstreamCmd string
+	// UpstreamBinary is the primary tool name parsed from UpstreamCmd (e.g.
+	// "nmap", "curl", "journalctl").
+	UpstreamBinary string
+	// cmdEntities records which entity values came from the upstream command
+	// line, so they can be scored at maximum confidence.
+	cmdEntities map[EntityKind]map[string]bool
 }
 
 // First returns the first extracted value of the given kind, or "".

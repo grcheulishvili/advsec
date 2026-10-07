@@ -190,7 +190,7 @@ if [ -n "$ZSH_VERSION" ]; then
         last=$(fc -ln -1 2>/dev/null | sed 's/^[[:space:]]*//')
         [ -z "$last" ] && { echo; echo "advsec: no previous command"; return; }
         echo
-        eval "$last" 2>&1 | advsec --top 3
+        eval "$last" 2>&1 | advsec --cmd "$last" --top 3
     }
     zle -N _advsec_widget
     bindkey '^[^A' _advsec_widget 2>/dev/null   # Ctrl+Alt+A
@@ -201,7 +201,7 @@ if [ -n "$ZSH_VERSION" ]; then
     _advsec_buffer_widget() {
         [ -z "$BUFFER" ] && { zle -M "advsec: empty buffer"; return; }
         echo
-        eval "$BUFFER" 2>&1 | advsec --top 3
+        eval "$BUFFER" 2>&1 | advsec --cmd "$BUFFER" --top 3
         zle reset-prompt
     }
     zle -N _advsec_buffer_widget
@@ -219,7 +219,7 @@ if [ -n "$BASH_VERSION" ]; then
         last=$(fc -ln -1 2>/dev/null | sed 's/^[[:space:]]*//')
         [ -z "$last" ] && { echo; echo "advsec: no previous command"; return; }
         echo
-        eval "$last" 2>&1 | advsec --top 3
+        eval "$last" 2>&1 | advsec --cmd "$last" --top 3
     }
     bind -x '"\e\C-a": _advsec_widget' 2>/dev/null   # Ctrl+Alt+A
     bind -x '"\e\C-A": _advsec_widget' 2>/dev/null   # Ctrl+Alt+Shift+A

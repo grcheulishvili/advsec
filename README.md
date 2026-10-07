@@ -252,8 +252,17 @@ cat weird_unlabeled.log | advsec --semantic
 | `--no-color` | Plain output |
 | `-f, --input FILE` | Read from a file instead of stdin |
 | `--semantic`, `--embedding` | Opt in to the local AI classifier (see below) |
+| `--cmd "<command>"` | Upstream command to fuse (auto-detected from the pipe when omitted) |
 
 Subcommands: `plugin list|install|update`, `update-cache`, `init zsh|bash|--install`, `setup-semantic`.
+
+**Zero-config upstream detection.** When advsec reads from a pipe it traces
+`/proc` to recover the writer's command line (e.g. `nmap -sV -p 22,80 10.10.10.5`)
+with no flags required, so targets and ports from your *command* take priority
+over noise in the tool's stdout. Resolution order: automatic `/proc` tracing ->
+`$ADVSEC_CMD` -> an explicit `--cmd`. Instant-exit or shell-wrapped writers fall
+through to the fallbacks; the `Alt+A` widget passes `--cmd "$last"` for exactly
+that reason.
 
 ---
 

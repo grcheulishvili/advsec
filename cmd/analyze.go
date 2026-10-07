@@ -43,6 +43,10 @@ func resolveContext() string {
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
+	// Resolve the upstream command BEFORE draining stdin: the writer process
+	// must still be alive on the pipe for /proc tracing to see it.
+	upstreamCmd := engine.ResolveUpstreamCmd(flagCmd)
+
 	input, err := readInput()
 	if err != nil {
 		return err
@@ -60,6 +64,13 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	if (flagFormat == "" && ctx.Format == engine.FormatAdvsecOutput) || flagFormat == string(engine.FormatAdvsecOutput) {
 		fmt.Println("advsec: input identified as advsec output or help page - no actionable targets found.")
 		return nil
+	}
+
+	// Fuse the upstream command line (zero-config auto-detection, or fallbacks):
+	// its targets/ports are promoted to maximum priority so stdout noise never
+	// overrides the operator's explicit command target.
+	if upstreamCmd != "" {
+		engine.FuseCommandLine(ctx, upstreamCmd)
 	}
 
 	host := osdetect.Detect()
@@ -236,9 +247,11 @@ type jsonRec struct {
 }
 
 type jsonReport struct {
-	Context string `json:"context,omitempty"`
-	Format  string `json:"format,omitempty"`
-	Host    struct {
+	Context        string `json:"context,omitempty"`
+	Format         string `json:"format,omitempty"`
+	UpstreamCmd    string `json:"upstream_cmd,omitempty"`
+	UpstreamBinary string `json:"upstream_binary,omitempty"`
+	Host           struct {
 		ID         string `json:"id"`
 		PrettyName string `json:"pretty_name"`
 		Family     string `json:"family"`
@@ -252,6 +265,8 @@ func emitJSON(r *engine.Report, activeCtx string, format engine.Format) error {
 	var jr jsonReport
 	jr.Context = activeCtx
 	jr.Format = string(format)
+	jr.UpstreamCmd = r.Context.UpstreamCmd
+	jr.UpstreamBinary = r.Context.UpstreamBinary
 	jr.Host.ID = r.Host.ID
 	jr.Host.PrettyName = r.Host.PrettyName
 	jr.Host.Family = string(r.Host.Family)
