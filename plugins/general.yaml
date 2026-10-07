@@ -26,11 +26,11 @@ tactics:
   tools:
     - name: "list + extract (7z)"
       binary: "7z"
-      command: "7z l {target} ; 7z x {target} -o./extracted"
+      command: "7z l {target_file} ; 7z x {target_file} -o./extracted"
       purpose: "Handle virtually any archive format uniformly."
     - name: "tar"
       binary: "tar"
-      command: "tar tf {target} | head ; tar xf {target} -C ./extracted"
+      command: "tar tf {target_file} | head ; tar xf {target_file} -C ./extracted"
       purpose: "Inspect and extract tar-based archives."
 ---
 id: gen-document
@@ -52,11 +52,11 @@ tactics:
   tools:
     - name: "pdf text + info"
       binary: "pdftotext"
-      command: "pdfinfo {target} ; pdftotext {target} - | head"
+      command: "pdfinfo {target_file} ; pdftotext {target_file} - | head"
       purpose: "Metadata and text extraction from PDFs."
     - name: "macro check (oletools)"
       binary: "olevba"
-      command: "olevba {target}"
+      command: "olevba {target_file}"
       purpose: "Detect and dump VBA macros in Office files."
       install: "pipx install oletools"
 ---
@@ -79,11 +79,11 @@ tactics:
   tools:
     - name: "jq explore"
       binary: "jq"
-      command: "jq -C . {target} | head -50"
+      command: "jq -C . {target_file} | head -50"
       purpose: "Pretty-print and navigate JSON."
     - name: "secrets grep"
       binary: "rg"
-      command: "rg -i 'pass|token|secret|key|host|url' {target}"
+      command: "rg -i 'pass|token|secret|key|host|url' {target_file}"
       purpose: "Surface interesting fields quickly."
 ---
 id: gen-git-repo
@@ -132,11 +132,11 @@ tactics:
   tools:
     - name: "sqlite tables"
       binary: "sqlite3"
-      command: "sqlite3 {target} '.tables' ; sqlite3 {target} '.schema'"
+      command: "sqlite3 {target_file} '.tables' ; sqlite3 {target_file} '.schema'"
       purpose: "List tables and schema."
     - name: "dump users"
       binary: "sqlite3"
-      command: "sqlite3 {target} 'SELECT * FROM users LIMIT 20;'"
+      command: "sqlite3 {target_file} 'SELECT * FROM users LIMIT 20;'"
       purpose: "Inspect likely credential tables."
 ---
 id: gen-unknown-binary
@@ -158,9 +158,9 @@ tactics:
   tools:
     - name: "hexdump head"
       binary: "xxd"
-      command: "xxd {target} | head -20"
+      command: "xxd {target_file} | head -20"
       purpose: "Inspect magic bytes and structure."
     - name: "binwalk signatures"
       binary: "binwalk"
-      command: "binwalk {target}"
+      command: "binwalk {target_file}"
       purpose: "Scan for embedded file signatures."

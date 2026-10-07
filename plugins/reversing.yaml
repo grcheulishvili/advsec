@@ -22,19 +22,19 @@ tactics:
       binary: "checksec"
       step: 1
       phase_label: "Phase 1: Binary Identification & Mitigations"
-      command: "file {target} ; checksec --file={target}"
+      command: "file {target_file} ; checksec --file={target_file}"
       purpose: "Verify architecture and active security mitigations (RELRO/NX/PIE/Canary)."
     - name: "rabin2"
       binary: "rabin2"
       step: 2
       phase_label: "Phase 2: Static Analysis"
-      command: "rabin2 -I {target} ; rabin2 -i {target} ; rabin2 -z {target}"
+      command: "rabin2 -I {target_file} ; rabin2 -i {target_file} ; rabin2 -z {target_file}"
       purpose: "Header metadata, imports, and data-section strings."
     - name: "radare2"
       binary: "r2"
       step: 2
       phase_label: "Phase 2: Static Analysis"
-      command: "r2 -AA {target}"
+      command: "r2 -AA {target_file}"
       purpose: "Auto-analyze functions, xrefs, and strings."
     - name: "ghidra"
       binary: "ghidra"
@@ -47,7 +47,7 @@ tactics:
       binary: "gdb"
       step: 3
       phase_label: "Phase 3: Dynamic Instrumentation"
-      command: "gdb -q {target}"
+      command: "gdb -q {target_file}"
       purpose: "Inspect functions, disassembly, and runtime memory."
 ---
 id: rev-upx-packed
@@ -69,7 +69,7 @@ tactics:
   tools:
     - name: "upx decompress"
       binary: "upx"
-      command: "upx -d {target} -o {target}.unpacked"
+      command: "upx -d {target_file} -o {target_file}.unpacked"
       purpose: "Restore the original image from a UPX-packed binary."
 ---
 id: rev-packed-high-entropy
@@ -91,11 +91,11 @@ tactics:
   tools:
     - name: "entropy scan"
       binary: "binwalk"
-      command: "binwalk -E {target}"
+      command: "binwalk -E {target_file}"
       purpose: "Plot entropy to locate packed/compressed regions."
     - name: "radare2 dump"
       binary: "r2"
-      command: "r2 -d {target}"
+      command: "r2 -d {target_file}"
       purpose: "Debug to the original entry point and dump the unpacked image."
 ---
 id: rev-dotnet
@@ -117,12 +117,12 @@ tactics:
   tools:
     - name: "ilspycmd"
       binary: "ilspycmd"
-      command: "ilspycmd {target} -o ./decompiled"
+      command: "ilspycmd {target_file} -o ./decompiled"
       purpose: "Decompile the assembly back to C#."
       install: "dotnet tool install -g ilspycmd"
     - name: "monodis"
       binary: "monodis"
-      command: "monodis {target}"
+      command: "monodis {target_file}"
       purpose: "Disassemble CIL with the Mono toolchain."
 ---
 id: rev-go-binary
@@ -144,12 +144,12 @@ tactics:
   tools:
     - name: "GoReSym"
       binary: "GoReSym"
-      command: "GoReSym -p {target}"
+      command: "GoReSym -p {target_file}"
       purpose: "Recover function and type metadata from a Go binary."
       install: "go install github.com/mandiant/GoReSym@latest"
     - name: "redress"
       binary: "redress"
-      command: "redress -source {target}"
+      command: "redress -source {target_file}"
       purpose: "Reconstruct Go package/source structure."
       install: "go install github.com/goretk/redress@latest"
 ---
@@ -175,11 +175,11 @@ tactics:
   tools:
     - name: "peldd / pedump"
       binary: "readpe"
-      command: "readpe -H {target} ; readpe -i {target}"
+      command: "readpe -H {target_file} ; readpe -i {target_file}"
       purpose: "Dump PE headers and the import table."
     - name: "capa"
       binary: "capa"
-      command: "capa {target}"
+      command: "capa {target_file}"
       purpose: "Identify capabilities via FLARE rules."
       install: "pipx install flare-capa"
 ---
@@ -202,7 +202,7 @@ tactics:
   tools:
     - name: "rabin2 mach"
       binary: "rabin2"
-      command: "rabin2 -A {target} ; rabin2 -I {target}"
+      command: "rabin2 -A {target_file} ; rabin2 -I {target_file}"
       purpose: "List architectures and header info."
 ---
 id: rev-interesting-strings
@@ -224,11 +224,11 @@ tactics:
   tools:
     - name: "strings + grep"
       binary: "strings"
-      command: "strings -n 8 {target} | rg -i 'pass|key|token|secret|http'"
+      command: "strings -n 8 {target_file} | rg -i 'pass|key|token|secret|http'"
       purpose: "Surface credentials, URLs, and endpoints."
     - name: "flare-floss"
       binary: "floss"
-      command: "floss {target}"
+      command: "floss {target_file}"
       purpose: "Recover obfuscated/stack strings FLOSS-style."
       install: "pipx install flare-floss"
 ---
@@ -251,5 +251,5 @@ tactics:
   tools:
     - name: "ltrace ptrace"
       binary: "ltrace"
-      command: "ltrace -e ptrace {target}"
+      command: "ltrace -e ptrace {target_file}"
       purpose: "Confirm ptrace self-attach anti-debug."

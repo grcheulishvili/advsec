@@ -102,11 +102,11 @@ tactics:
   tools:
     - name: "failed units"
       binary: "systemctl"
-      command: "systemctl --failed ; systemctl status <unit> -l --no-pager"
+      command: "systemctl --failed ; systemctl status {systemd_unit} -l --no-pager"
       purpose: "List failures and the unit's state."
     - name: "unit logs"
       binary: "journalctl"
-      command: "journalctl -u <unit> -p err --since '-1h' --no-pager"
+      command: "journalctl -u {systemd_unit} -p err --since '-1h' --no-pager"
       purpose: "Recent error-level logs for the unit."
     - name: "coredumpctl"
       binary: "coredumpctl"
@@ -210,11 +210,11 @@ tactics:
       binary: "shellcheck"
       step: 1
       phase_label: "Phase 1: Static Lint"
-      command: "shellcheck {target}"
+      command: "shellcheck {target_file}"
       purpose: "Static analysis for shell scripting bugs and unsafe patterns."
     - name: "audit remote pipes"
       binary: "grep"
       step: 1
       phase_label: "Phase 1: Static Lint"
-      command: "grep -nE 'curl|wget|eval|sudo|chmod \\+x|/dev/tcp' {target}"
+      command: "grep -nE 'curl|wget|eval|sudo|chmod \\+x|/dev/tcp' {target_file}"
       purpose: "Surface remote fetch-and-execute and privilege changes for review."

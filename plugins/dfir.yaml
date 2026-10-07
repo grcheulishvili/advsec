@@ -148,3 +148,38 @@ tactics:
       binary: "bash"
       command: "for u in $(cut -f1 -d: /etc/passwd); do echo \"== $u\"; crontab -lu $u 2>/dev/null; done; cat /etc/cron*/* 2>/dev/null"
       purpose: "Dump every user and system cron entry."
+---
+id: dfir-service-journal
+name: "Service / Daemon Log Triage"
+target_type: host
+domain: dfir
+author: official
+os_packages:
+  arch: [systemd]
+  debian: [systemd]
+  kali: [systemd]
+# Fires on timestamped service/daemon logs. Uses {systemd_unit}, dynamically
+# recovered from the log (process tag, lifecycle message, or /var/log path);
+# if no unit can be recovered the recommendation is suppressed rather than
+# rendering a raw <systemd-unit> template.
+match:
+  logic: any
+  rules:
+    - format: "text/log"
+tactics:
+  phase: "Incident Response (Service Logs)"
+  priority: 40
+  next_step: "Pull the unit's own errors from the journal, then widen the window to see what preceded them."
+  tools:
+    - name: "journal errors for unit"
+      binary: "journalctl"
+      step: 1
+      phase_label: "Phase 1: Triage"
+      command: "journalctl -u {systemd_unit} -p err --since '-1h' --no-pager"
+      purpose: "Show recent error-priority entries for the implicated unit."
+    - name: "unit status"
+      binary: "systemctl"
+      step: 1
+      phase_label: "Phase 1: Triage"
+      command: "systemctl status {systemd_unit} --no-pager -l"
+      purpose: "Current state, recent log tail, and the unit's main PID."

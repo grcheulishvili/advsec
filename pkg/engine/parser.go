@@ -37,6 +37,9 @@ const (
 	EntityEmail   EntityKind = "email"
 	EntityGPGKey  EntityKind = "gpg_key"
 	EntityPath    EntityKind = "path"
+	// EntitySystemdUnit holds systemd service/unit names recovered from log
+	// streams, process tags, or log paths (drives {systemd_unit}).
+	EntitySystemdUnit EntityKind = "systemd_unit"
 )
 
 // Context is the structured view of a chunk of piped input. It carries both
@@ -63,6 +66,11 @@ type Context struct {
 	// UpstreamBinary is the primary tool name parsed from UpstreamCmd (e.g.
 	// "nmap", "curl", "journalctl").
 	UpstreamBinary string
+	// InputFile is the real file path being analyzed (from -f/--input or a file
+	// argument on the upstream command). Empty for an anonymous stdin stream.
+	// File-processing tools bind {target_file} to this - never to a network
+	// entity - so a log's extracted IP is never treated as a filename.
+	InputFile string
 	// cmdEntities records which entity values came from the upstream command
 	// line, so they can be scored at maximum confidence.
 	cmdEntities map[EntityKind]map[string]bool
@@ -118,7 +126,87 @@ var (
 	// reGPGContext marks input where 40-hex tokens are PGP key fingerprints
 	// rather than SHA-1 digests.
 	reGPGContext = regexp.MustCompile(`(?i)recv-keys|pacman-key|gpg\s*--|--recv|fingerprint|gpg:|key server|keyserver|0x[0-9A-Fa-f]{16}`)
+
+	// --- systemd unit recovery (drives {systemd_unit}) ---
+	// An explicit `-u <unit>` on a journalctl/systemctl command line.
+	reUnitJournal = regexp.MustCompile(`(?i)(?:journalctl|systemctl)[^\n]*?\s-u\s+([A-Za-z0-9@%._-]+)`)
+	// A fully-qualified unit token (foo.service / foo.socket / foo.timer).
+	reUnitService = regexp.MustCompile(`\b([A-Za-z0-9@%._-]+)\.(?:service|socket|timer|target|mount|path)\b`)
+	// systemd lifecycle messages: "Starting mullvad-daemon...", "Started sshd".
+	reUnitLifecycle = regexp.MustCompile(`(?i)\b(?:Starting|Started|Stopping|Stopped|Reloading|Reloaded|Failed to start)\s+([A-Za-z0-9@%._-]+)`)
+	// A syslog-style process tag: "sshd[1234]:" or "mullvad-daemon[42]:".
+	reUnitProcTag = regexp.MustCompile(`(?m)\b([a-z][a-z0-9._-]{2,})\[\d+\]:`)
+	// A service log directory: /var/log/<unit>/... (e.g. mullvad-vpn).
+	reUnitLogPath = regexp.MustCompile(`/var/log/([a-z0-9][a-z0-9._-]+)/`)
+	// A bracketed component tag some daemons emit: "[mullvad_daemon]".
+	reUnitBracketTag = regexp.MustCompile(`\[([a-z][a-z0-9_-]{2,})\]`)
 )
+
+// unitNoise are generic tokens that look unit-ish but are never useful systemd
+// units; they are skipped so {systemd_unit} binds to the real service.
+var unitNoise = map[string]bool{
+	"info": true, "warn": true, "warning": true, "error": true, "err": true,
+	"debug": true, "trace": true, "notice": true, "crit": true, "fatal": true,
+	"the": true, "a": true, "to": true, "up": true, "version": true, "system": true,
+	"daemon": true, "service": true, "log": true, "main": true,
+}
+
+// extractSystemdUnits recovers candidate systemd unit names from a stream and
+// adds them (most specific first) to EntitySystemdUnit.
+func extractSystemdUnits(ctx *Context, raw string) {
+	var units []string
+	push := func(u string) {
+		u = strings.TrimSpace(strings.TrimSuffix(u, ".service"))
+		u = strings.Trim(u, ".")
+		if u == "" || unitNoise[strings.ToLower(u)] {
+			return
+		}
+		// A unit name carries a letter and a service-ish shape; reject bare
+		// numbers and single short tokens with no separator unless they are a
+		// known-looking daemon (contain a letter, length >= 3).
+		if len(u) < 3 {
+			return
+		}
+		hasLetter := false
+		for _, r := range u {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				hasLetter = true
+				break
+			}
+		}
+		if !hasLetter {
+			return
+		}
+		units = appendUnique(units, u)
+	}
+
+	// Priority 1: explicit `-u <unit>` and fully-qualified *.service tokens.
+	for _, m := range reUnitJournal.FindAllStringSubmatch(raw, -1) {
+		push(m[1])
+	}
+	for _, m := range reUnitService.FindAllStringSubmatch(raw, -1) {
+		push(m[1])
+	}
+	// Priority 2: lifecycle messages and syslog process tags.
+	for _, m := range reUnitLifecycle.FindAllStringSubmatch(raw, -1) {
+		push(m[1])
+	}
+	for _, m := range reUnitProcTag.FindAllStringSubmatch(raw, -1) {
+		push(m[1])
+	}
+	// Priority 3: service log directory and bracketed component tags.
+	for _, m := range reUnitLogPath.FindAllStringSubmatch(raw, -1) {
+		push(m[1])
+	}
+	for _, m := range reUnitBracketTag.FindAllStringSubmatch(raw, -1) {
+		// Normalize underscore component tags (mullvad_daemon) to hyphen form,
+		// which matches real unit naming (mullvad-daemon).
+		push(strings.ReplaceAll(m[1], "_", "-"))
+	}
+	for _, u := range units {
+		ctx.Entities[EntitySystemdUnit] = appendUnique(ctx.Entities[EntitySystemdUnit], u)
+	}
+}
 
 // loopbackOrBind reports whether an IP string is a loopback / unspecified /
 // bind-only address that should not drive network attack recommendations.
@@ -297,6 +385,15 @@ func ParseString(raw string) *Context {
 
 	add(EntityCVE, reCVE.FindAllString(raw, -1)...)
 	add(EntityEmail, reEmail.FindAllString(raw, -1)...)
+
+	// systemd unit recovery is relevant for log/shell/system streams, where a
+	// rule may want `journalctl -u <unit>`; skip code/binary/network formats
+	// where the tokens would be noise.
+	switch ctx.Format {
+	case FormatLog, FormatShell, FormatText, FormatSocket, FormatUnknown:
+		extractSystemdUnits(ctx, raw)
+	}
+
 	ctx.ExternalTarget = external
 
 	// Keep port output stable and human-friendly.

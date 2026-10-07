@@ -23,19 +23,19 @@ tactics:
       binary: "checksec"
       step: 1
       phase_label: "Phase 1: Binary Identification & Mitigations"
-      command: "checksec --file={target}"
+      command: "checksec --file={target_file}"
       purpose: "Enumerate RELRO, Stack Canary, NX, PIE, and Fortify."
     - name: "gdb + pwndbg"
       binary: "gdb"
       step: 3
       phase_label: "Phase 3: Dynamic Instrumentation"
-      command: "gdb -q {target}"
+      command: "gdb -q {target_file}"
       purpose: "Dynamic analysis; cyclic/pattern to locate the offset."
     - name: "pwntools template"
       binary: "pwn"
       step: 4
       phase_label: "Phase 4: Exploit Generation / Patching"
-      command: "pwn template {target} > exploit.py"
+      command: "pwn template {target_file} > exploit.py"
       purpose: "Generate an exploit-script skeleton wired to the target."
       install: "pipx install pwntools"
 ---
@@ -63,7 +63,7 @@ tactics:
       install: "pipx install pwntools"
     - name: "ropper"
       binary: "ropper"
-      command: "ropper --file {target} --search 'pop rdi; ret'"
+      command: "ropper --file {target_file} --search 'pop rdi; ret'"
       purpose: "Find gadgets for a ret2libc / ROP chain."
       install: "pipx install ropper"
 ---
@@ -86,7 +86,7 @@ tactics:
   tools:
     - name: "ROPgadget"
       binary: "ROPgadget"
-      command: "ROPgadget --binary {target} --ropchain"
+      command: "ROPgadget --binary {target_file} --ropchain"
       purpose: "Enumerate gadgets and auto-build a chain where possible."
       install: "pipx install ropgadget"
     - name: "one_gadget"
@@ -137,7 +137,7 @@ tactics:
   tools:
     - name: "pwndbg heap"
       binary: "gdb"
-      command: "gdb -q {target} -ex 'heap' -ex 'bins'"
+      command: "gdb -q {target_file} -ex 'heap' -ex 'bins'"
       purpose: "Inspect heap chunks and bin state (needs pwndbg/gef)."
     - name: "libc database"
       binary: "libc-database"
@@ -164,7 +164,7 @@ tactics:
   tools:
     - name: "vmmap"
       binary: "gdb"
-      command: "gdb -q {target} -ex 'break main' -ex 'run' -ex 'vmmap'"
+      command: "gdb -q {target_file} -ex 'break main' -ex 'run' -ex 'vmmap'"
       purpose: "Observe the randomized base layout at runtime."
 ---
 id: pwn-statically-linked
@@ -187,7 +187,7 @@ tactics:
   tools:
     - name: "ROPgadget syscalls"
       binary: "ROPgadget"
-      command: "ROPgadget --binary {target} --only 'syscall|ret'"
+      command: "ROPgadget --binary {target_file} --only 'syscall|ret'"
       purpose: "Locate syscall gadgets for ret2syscall."
       install: "pipx install ropgadget"
 ---
@@ -210,7 +210,7 @@ tactics:
   tools:
     - name: "strace"
       binary: "strace"
-      command: "strace -f -e trace=execve,open,openat {target}"
+      command: "strace -f -e trace=execve,open,openat {target_file}"
       purpose: "Watch for hijackable paths and environment reliance."
     - name: "GTFOBins check"
       binary: "curl"
@@ -236,5 +236,5 @@ tactics:
   tools:
     - name: "gdb core"
       binary: "gdb"
-      command: "gdb -q -c {target}"
+      command: "gdb -q -c {target_file}"
       purpose: "Inspect with bt, info registers, x/i $pc."

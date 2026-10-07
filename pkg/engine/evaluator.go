@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 
@@ -98,21 +99,35 @@ func (e *Evaluator) Evaluate(ctx *Context, matches []Match) *Report {
 			Confidence: m.Confidence,
 		}
 		for _, t := range m.Plugin.Tactics.Tools {
-			rec.Tools = append(rec.Tools, e.resolveTool(t, m.Plugin, ctx))
+			tr, ok := e.resolveTool(t, m.Plugin, ctx)
+			if !ok {
+				continue // required target placeholder could not be resolved/synthesized
+			}
+			rec.Tools = append(rec.Tools, tr)
+		}
+		// Suppress a recommendation entirely when every one of its tools was
+		// dropped for unresolved placeholders, rather than emitting commands
+		// full of raw <target-domain>/<systemd-unit> template syntax.
+		if len(rec.Tools) == 0 {
+			continue
 		}
 		rep.Recommendations = append(rep.Recommendations, rec)
 	}
 	return rep
 }
 
-func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) ToolRec {
+func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) (ToolRec, bool) {
 	binary := t.Binary
 	if binary == "" {
 		binary = firstWord(t.Command)
 	}
 	installed := osdetect.IsInstalled(binary)
 
-	cmd, notes := VerifyCommandAssets(expandPlaceholders(t.Command, ctx), e.host.Manager)
+	expanded, unresolved := expandPlaceholdersResolved(t.Command, ctx)
+	if len(unresolved) > 0 {
+		return ToolRec{}, false
+	}
+	cmd, notes := VerifyCommandAssets(expanded, e.host.Manager)
 	tr := ToolRec{
 		Name:       t.Name,
 		Purpose:    t.Purpose,
@@ -128,7 +143,7 @@ func (e *Evaluator) resolveTool(t plugin.Tool, p plugin.Plugin, ctx *Context) To
 	if !installed {
 		tr.InstallCommand = e.installCommandFor(p, t, binary)
 	}
-	return tr
+	return tr, true
 }
 
 // installCommandFor resolves the package(s) that provide a tool for the host
@@ -163,41 +178,109 @@ func (e *Evaluator) installCommandFor(p plugin.Plugin, t plugin.Tool, binary str
 	return ""
 }
 
-// expandPlaceholders substitutes {target}, {target_ip}, {target_domain},
-// {target_port}, {target_url}, {target_hash}, and {target_addr} using parsed
-// entities. Unknown or unmatched placeholders are left intact so the operator
-// can see what still needs filling in.
+// suppressionPlaceholders are the target-binding tokens that MUST resolve (or
+// be synthesizable) for a recommendation to be useful. A command still carrying
+// any of these after expansion is dropped rather than rendered with raw
+// <target-domain>/<systemd-unit> template syntax.
+var suppressionPlaceholders = map[string]bool{
+	"{target}":        true,
+	"{target_ip}":     true,
+	"{target_domain}": true,
+	"{target_url}":    true,
+	"{systemd_unit}":  true,
+}
+
+// expandPlaceholders substitutes entity placeholders, returning only the
+// rendered string. Unresolved suppression placeholders are shown as readable
+// angle-bracket fallbacks here (callers that must drop such commands use
+// expandPlaceholdersResolved instead).
 func expandPlaceholders(cmd string, ctx *Context) string {
-	repl := map[string]string{
+	out, _ := expandPlaceholdersResolved(cmd, ctx)
+	return out
+}
+
+// expandPlaceholdersResolved expands all placeholders and additionally reports
+// which suppression placeholders could not be resolved or synthesized.
+//
+//   - {target_file} binds to the real input file path, or is elided so the tool
+//     reads stdin. It is NEVER bound to an IP/URL/domain.
+//   - {target_url} is synthesized as http://<domain|ip> when no URL was seen.
+//   - {systemd_unit} binds to a recovered systemd unit name.
+//   - {target}/{target_ip}/{target_domain} bind to their entities.
+//
+// Any suppression placeholder with no value is returned in `unresolved`; for
+// display, all leftover tokens are rewritten to angle-bracket fallbacks so raw
+// {curly} syntax never reaches output.
+func expandPlaceholdersResolved(cmd string, ctx *Context) (string, []string) {
+	out := cmd
+
+	// {target_file}: the real input file path, or a readable <input-file>
+	// placeholder for an anonymous stdin stream. It is NEVER bound to a network
+	// entity - this is the core of the file-vs-entity binding fix, so a log's
+	// extracted IP can never be substituted as a filename argument.
+	if strings.Contains(out, "{target_file}") {
+		if ctx.InputFile != "" {
+			out = strings.ReplaceAll(out, "{target_file}", ctx.InputFile)
+		} else {
+			out = strings.ReplaceAll(out, "{target_file}", "<input-file>")
+		}
+	}
+
+	bind := map[string]string{
 		"{target_ip}":     ctx.First(EntityIP),
 		"{target_domain}": ctx.First(EntityDomain),
 		"{target_port}":   ctx.First(EntityPort),
-		"{target_url}":    ctx.First(EntityURL),
 		"{target_hash}":   ctx.First(EntityHash),
 		"{target_addr}":   ctx.First(EntityMemAddr),
 		"{target_cve}":    ctx.First(EntityCVE),
+		"{systemd_unit}":  ctx.First(EntitySystemdUnit),
+		"{target_url}":    synthURL(ctx),
+		"{target}": firstNonEmpty(
+			ctx.First(EntityDomain), ctx.First(EntityURL), ctx.First(EntityIP)),
 	}
-	// {target} is a generic best-guess: domain, then URL, then IP.
-	repl["{target}"] = firstNonEmpty(
-		ctx.First(EntityDomain),
-		ctx.First(EntityURL),
-		ctx.First(EntityIP),
-	)
 
-	out := cmd
-	for k, v := range repl {
+	var unresolved []string
+	for tok, v := range bind {
+		if !strings.Contains(out, tok) {
+			continue
+		}
 		if v != "" {
-			out = strings.ReplaceAll(out, k, v)
+			out = strings.ReplaceAll(out, tok, v)
+		} else if suppressionPlaceholders[tok] {
+			unresolved = append(unresolved, tok)
 		}
 	}
-	// Fallback binding: any placeholder still unbound (e.g. a command wants
-	// {target_domain} but only an IP was extracted) is rewritten to a readable
-	// angle-bracket placeholder so the operator never sees raw template syntax.
+
+	// Angle-bracket fallback for any token still present (display safety).
 	for tmpl, ph := range placeholderFallbacks {
 		out = strings.ReplaceAll(out, tmpl, ph)
 	}
-	return out
+	return collapseSpaces(out), unresolved
 }
+
+// synthURL returns a usable URL for {target_url}: an extracted URL, else a
+// synthesized http:// address over a known domain or IP, else "".
+func synthURL(ctx *Context) string {
+	if u := ctx.First(EntityURL); u != "" {
+		return u
+	}
+	if d := ctx.First(EntityDomain); d != "" {
+		return "http://" + d
+	}
+	if ip := ctx.First(EntityIP); ip != "" {
+		return "http://" + ip
+	}
+	return ""
+}
+
+// collapseSpaces normalizes runs of spaces left by elided placeholders and
+// trims the result, so `jq -C .  | head` becomes `jq -C . | head`.
+func collapseSpaces(s string) string {
+	s = reMultiSpace.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
+var reMultiSpace = regexp.MustCompile(`[ \t]{2,}`)
 
 // placeholderFallbacks maps each template token to the human placeholder shown
 // when no value was available to bind.
@@ -210,6 +293,7 @@ var placeholderFallbacks = map[string]string{
 	"{target_addr}":   "<target-addr>",
 	"{target_cve}":    "<target-cve>",
 	"{target}":        "<target>",
+	"{systemd_unit}":  "<systemd-unit>",
 }
 
 func firstWord(s string) string {

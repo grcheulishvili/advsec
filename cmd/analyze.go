@@ -73,6 +73,15 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		engine.FuseCommandLine(ctx, upstreamCmd)
 	}
 
+	// Resolve the real input file for {target_file} binding: an explicit
+	// -f/--input path, else a file argument recovered from the upstream command.
+	// File-processing tools bind to this - never to an extracted IP/URL/domain.
+	if flagInputFile != "" {
+		ctx.InputFile = flagInputFile
+	} else if p := ctx.First(engine.EntityPath); p != "" {
+		ctx.InputFile = p
+	}
+
 	host := osdetect.Detect()
 
 	dirs := plugin.SearchDirs()

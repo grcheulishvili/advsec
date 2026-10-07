@@ -23,21 +23,21 @@ tactics:
       binary: "js-beautify"
       step: 1
       phase_label: "Phase 1: Code Formatting & Unpacking"
-      command: "js-beautify {target} -o formatted.js"
+      command: "js-beautify {target_file} -o formatted.js"
       purpose: "Reformat minified or packed JavaScript source code."
       install: "npm install -g js-beautify"
     - name: "webcrack / synchrony"
       binary: "webcrack"
       step: 2
       phase_label: "Phase 2: AST Deobfuscation"
-      command: "webcrack {target} -o ./decompiled"
+      command: "webcrack {target_file} -o ./decompiled"
       purpose: "Deobfuscate string arrays, proxy functions, and control-flow flattening."
       install: "npm install -g webcrack"
     - name: "node-inspect"
       binary: "node"
       step: 3
       phase_label: "Phase 3: Dynamic Sandbox Debugging"
-      command: "node --inspect-brk {target}"
+      command: "node --inspect-brk {target_file}"
       purpose: "Attach the V8 debugger to inspect runtime variable decoding (sandbox only)."
 ---
 id: js-secrets
@@ -60,11 +60,11 @@ tactics:
   tools:
     - name: "secret grep"
       binary: "rg"
-      command: "rg -oiN 'api[_-]?key|secret|token|https?://[^\"'\\'' ]+' {target}"
+      command: "rg -oiN 'api[_-]?key|secret|token|https?://[^\"'\\'' ]+' {target_file}"
       purpose: "Surface credentials, tokens, and endpoint URLs."
     - name: "linkfinder"
       binary: "linkfinder"
-      command: "linkfinder -i {target} -o cli"
+      command: "linkfinder -i {target_file} -o cli"
       purpose: "Extract endpoints and paths from JavaScript."
       install: "pipx install linkfinder"
 ---
@@ -90,13 +90,13 @@ tactics:
       binary: "box-js"
       step: 2
       phase_label: "Phase 2: AST Deobfuscation"
-      command: "box-js {target} --output-dir ./boxjs-out"
+      command: "box-js {target_file} --output-dir ./boxjs-out"
       purpose: "Sandbox malicious JS/WScript and log dropped URLs and files."
       install: "npm install -g box-js"
     - name: "malware-jail"
       binary: "malware-jail"
       step: 3
       phase_label: "Phase 3: Dynamic Sandbox Debugging"
-      command: "node malware-jail.js {target}"
+      command: "node malware-jail.js {target_file}"
       purpose: "Emulate a browser/WScript environment to trace behavior."
       install: "git clone https://github.com/HynekPetrak/malware-jail"

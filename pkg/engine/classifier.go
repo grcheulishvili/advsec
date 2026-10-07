@@ -69,6 +69,15 @@ var (
 	reFileArchive = regexp.MustCompile(`(?im):\s+.*?(Zip archive data|gzip compressed|POSIX tar|tar archive|7-zip archive|RAR archive|bzip2 compressed|XZ compressed|Microsoft Cabinet)`)
 	// reAdvsecOut recognizes advsec's own banner, phase headers, and help page.
 	reAdvsecOut = regexp.MustCompile(`(?m)ADVSEC\s*\xe2\x94\x82|ADVSEC \||\[Phase \d|Usage:\s+advsec|advsec reads piped stdin|Tactical Objective:|Inferred Intent:`)
+	// reLogTimestamp matches line-leading timestamps - optionally wrapped in
+	// [...] or (...) - in ISO8601, "YYYY-MM-DD HH:MM:SS", bracketed dmesg, or
+	// classic syslog form. Checked BEFORE JSON/code heuristics so a timestamped
+	// log line that merely mentions a ".json" path is classified as a log, not
+	// JSON, and a leading "[" timestamp is not mistaken for a JSON array.
+	reLogTimestamp = regexp.MustCompile(`(?m)^\s*[\[(]?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}` +
+		`|^\s*[\[(]?\d{2}:\d{2}:\d{2}[.,]\d{1,6}` +
+		`|^\s*\[\s*\d+\.\d+\]` +
+		`|^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\b`)
 )
 
 // Classify profiles the first bytes of raw input and returns its format.
@@ -148,6 +157,12 @@ func Classify(raw string) Format {
 		default:
 			return FormatZip
 		}
+	}
+	// Timestamped log lines take priority over the JSON/code heuristics below:
+	// a line like `[2026-10-07 09:11:26.519] INFO path=/etc/x.json` is a log,
+	// not JSON, even though it starts with `[` and mentions a `.json` path.
+	if reLogTimestamp.MatchString(head) {
+		return FormatLog
 	}
 	// Wordlists / payload lists / path lists must be detected BEFORE code
 	// heuristics, since a list of `<script>` payloads would otherwise look like
