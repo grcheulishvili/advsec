@@ -12,6 +12,41 @@ cat phish.eml        | advsec
 
 It stays out of your way until you ask.
 
+> **Current version: `advsec 1.4.1`** - run `advsec --version` to confirm your build.
+
+---
+
+## What advsec is (and is not)
+
+**advsec is** an intelligent, context-aware UNIX pipeline assistant. It parses the structured output of security, system, and triage tools, maps the entities it extracts (IPs, domains, hashes, ports, crash addresses, headers, ...) against local rule matrices, and suggests immediate, executable next steps - phase-ordered and tailored to the tools actually installed on your box.
+
+**advsec is NOT** an automated vulnerability scanner, an exploit framework, or a background daemon that continuously intercepts your shell. It never runs on its own, never executes the commands it suggests, and never phones home.
+
+### Who it is for
+
+| Role | How advsec helps |
+| :--- | :--- |
+| **Penetration Testers & Red Teams** | Accelerates manual enumeration and suggests phase-ordered action chains during reconnaissance, web testing, and binary triage. |
+| **Incident Responders & Blue Teams** | Rapid triage of raw log bursts (`journalctl`, syslog), email headers (`.eml`), and suspicious file artifacts. |
+| **DevSecOps & Systems Engineers** | Infrastructure auditing, container/orchestration configuration checks (`docker`, `k8s`), and local troubleshooting. |
+
+---
+
+## How to use advsec effectively
+
+| Mode | Usage pattern | Best for |
+| :--- | :--- | :--- |
+| **Piped stream (default)** | `<tool_command> \| advsec` | Real-time analysis of live tool stdout (`nmap`, `curl`, `file`, `journalctl`). |
+| **Instant hotkey (`Alt+A`)** | Press `Alt+A` / `Ctrl+Alt+A` after running a command | Zero-friction analysis of the previous shell command without altering history. |
+| **Domain scoping (`-c`)** | `... \| advsec -c web` | Narrowing matches to one domain when analyzing multi-purpose output. |
+| **Interactive selection (`-i`)** | `... \| advsec -i` | Manually selecting the rule context from an interactive menu. |
+| **File reading (`-f`)** | `advsec -f /path/to/artifact` | Direct inspection of static log files, payloads, or script artifacts. |
+
+### Anti-patterns (what NOT to do)
+
+- **Do not pipe completely unstructured raw prose.** advsec relies on structural signatures, tool headers, and entity patterns; a paragraph of free text gives it nothing to anchor on.
+- **Do not expect automated execution.** advsec generates prioritized, ready-to-copy commands. It never runs destructive actions for you - you stay in control of every step.
+
 ---
 
 ## The 3 golden rules
@@ -22,44 +57,86 @@ It stays out of your way until you ask.
 
 ---
 
-## Real-world workflows
+## Advanced examples by domain
 
-Pipe a tool's output straight in. advsec figures out the format, scopes to the relevant domain, and prints an ordered action chain.
+Pipe a tool's output straight in. advsec figures out the format, scopes to the relevant domain, and prints an ordered action chain. The `-c` flag below is optional - advsec auto-scopes by detected format - but shown explicitly to make each domain clear.
 
-### Web & API assessment
-
-```sh
-curl -sI https://target | advsec
-```
-Reads the HTTP response headers, then suggests a security-header audit, technology fingerprinting (`whatweb`), directory discovery (`feroxbuster`/`ffuf`), and template-driven vuln scanning (`nuclei`).
-
-### Binary triage & reverse engineering
+### 1. Reverse engineering (`reversing`)
 
 ```sh
-file suspicious.bin | advsec
+file suspicious_elf | advsec -c reversing
 ```
-Detects the ELF64 architecture and walks the RE chain: mitigation audit (`checksec`) in Phase 1, static symbols and strings (`rabin2`, `radare2`) in Phase 2, then a GDB debugging session in Phase 3.
 
-### Incident response & log triage
+- **Extracted entity:** `ELF 64-bit LSB executable, x86-64`
+- **Suggested action chain:**
+  - **Phase 1:** `checksec --file=suspicious_elf` - audit ASLR / NX / stack canary.
+  - **Phase 2:** `rabin2 -I suspicious_elf` and `gdb suspicious_elf` - static then dynamic analysis.
+
+### 2. Web & API assessment (`web`)
 
 ```sh
-journalctl -u ssh | advsec
+curl -sI https://api.target.local | advsec -c web
 ```
-Spots the SSH brute-force burst, infers an **Immediate Containment** intent, and leads with log isolation (`grep`/`journalctl`), source banning (`fail2ban-client`), and account/session audits (`lastb`).
 
-### Phishing & email analysis
+- **Extracted entity:** `Server: nginx/1.18.0`, `X-Powered-By: Express`
+- **Suggested action chain:**
+  - **Phase 1:** `whatweb -a 3 https://api.target.local` - technology fingerprinting.
+  - **Phase 2:** `ffuf -u 'https://api.target.local/FUZZ' -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt` - content discovery.
+
+### 3. Binary exploitation (`pwn`)
 
 ```sh
-cat phish.eml | advsec
+gdb -ex 'run' -ex 'bt' ./vulnerable_bin | advsec -c pwn
 ```
-Auto-detects RFC822/MIME and scopes to email triage only - no unrelated network or AD noise. Checks SPF/DKIM/DMARC results, carves attachments (`ripmime`/`munpack`), and defangs URLs for safe reputation checks.
 
-### Obfuscated code analysis
+- **Extracted entity:** memory crash address (`0x41414141`), SIGSEGV pattern
+- **Suggested action chain:**
+  - **Phase 1:** `pattern create 200` and `checksec` - offset discovery and mitigation audit.
+  - **Phase 2:** `ropgadget --binary ./vulnerable_bin` - gadget hunting for ROP chains.
+
+### 4. Incident response & DFIR (`dfir`)
 
 ```sh
-cat payload.js | advsec
+journalctl -u sshd --since "10 min ago" | advsec -c dfir
 ```
-Recognizes packed JavaScript (`_0x` arrays, `eval(atob(...))`), skips network/AD/cloud rules entirely, and routes straight to beautifying (`js-beautify`), AST deobfuscation (`webcrack`), and sandboxed V8 debugging (`node --inspect-brk`).
+
+- **Extracted entity:** authentication failure bursts, source IP
+- **Suggested action chain:**
+  - **Phase 1:** `grep -i "failed" /var/log/auth.log | awk '{print $11}' | sort | uniq -c` - rank offending sources.
+  - **Phase 2:** `fail2ban-client status sshd` - confirm containment and active bans.
+
+### 5. Email & phishing triage (`eml`)
+
+```sh
+advsec -f suspicious_message.eml
+```
+
+- **Extracted entity:** `email/mime` format, header IPs, URLs
+- **Suggested action chain:**
+  - **Phase 1:** `eml-parser -i suspicious_message.eml` - structured header/attachment carve.
+  - **Phase 2:** extract headers and check SPF / DKIM / DMARC alignment.
+
+### 6. Cloud & container security (`cloud`)
+
+```sh
+kubectl get pods --all-namespaces | advsec -c cloud
+```
+
+- **Extracted entity:** Kubernetes pod inventory, privileged context markers
+- **Suggested action chain:**
+  - **Phase 1:** `trivy k8s --report summary cluster` - cluster-wide vulnerability and misconfig summary.
+  - **Phase 2:** audit RBAC bindings via `popeye` or `kube-bench`.
+
+### 7. Obfuscated code & JavaScript (`js`)
+
+```sh
+cat payload.js | advsec -c js
+```
+
+- **Extracted entity:** `code/javascript`, packed `_0x` string arrays
+- **Suggested action chain:**
+  - **Phase 1:** `js-beautify payload.js -o formatted.js` - normalize layout.
+  - **Phase 2:** `webcrack formatted.js -o ./decompiled` - AST-level deobfuscation and unpacking.
 
 ---
 
