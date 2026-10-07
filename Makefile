@@ -3,7 +3,7 @@ BINARY      := advsec
 PKG         := github.com/grcheulishvili/advsec
 CMD_PKG     := $(PKG)/cmd
 
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 1.2.1)
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 1.3.0)
 COMMIT      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 DATE        ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 

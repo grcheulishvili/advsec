@@ -173,6 +173,72 @@ advsec plugin list         # see what's installed
 
 ---
 
+## Optional AI classification (`--semantic`)
+
+The deterministic regex / magic-byte / TLD engine is always the primary
+classifier: plain `cat file | advsec` never touches a model, never opens a
+socket, and stays sub-20ms. For genuinely ambiguous streams - a weird log, a
+mixed dump, a snippet that matches nothing cleanly - advsec can *optionally*
+consult a **local** embedding model to guess the right domain.
+
+It is strictly opt-in and strictly offline-friendly:
+
+- The binary stays a pure static build (`CGO_ENABLED=0`). No llama.cpp, no GGUF,
+  no C++ is linked in. All vector work is done out-of-process by a local
+  [Ollama](https://ollama.com) daemon, reached over plain HTTP.
+- It runs **only** when you pass `--semantic` (alias `--embedding`), or when
+  `enable_semantic: true` is set in config *and* the deterministic engine
+  returned low confidence.
+- If the daemon is missing or slow (500ms budget), advsec prints one quiet line
+  to stderr and instantly falls back to the deterministic result. Pipes never
+  hang and never break.
+
+### One-time setup
+
+```sh
+advsec setup-semantic
+```
+
+This checks for a running Ollama daemon (`http://localhost:11434`), pulls an
+embedding model (`embeddinggemma-2`, falling back to `embeddinggemma` or
+`all-minilm`), and writes `~/.config/advsec/config.yaml`:
+
+```yaml
+enable_semantic: true
+semantic_endpoint: "http://localhost:11434"
+semantic_model: "embeddinggemma-2"
+similarity_threshold: 0.75
+```
+
+If Ollama isn't installed, `setup-semantic` prints the host-specific commands,
+e.g. on Arch:
+
+```sh
+sudo pacman -S ollama            # sudo apt install ollama on Debian/Kali
+sudo systemctl enable --now ollama
+advsec setup-semantic
+```
+
+### How it classifies
+
+Each input snippet is truncated to 1,024 characters and wrapped in
+EmbeddingGemma's symmetric classification prefix before being embedded:
+
+```
+task: classification | query: <snippet>
+```
+
+The resulting vector is compared (cosine similarity) against pre-seeded domain
+centroids (`pwn`, `reversing`, `web`, `dfir`, `cloud`, `sysadmin`, `crypto`,
+`redteam`, `js`). If the best score clears `similarity_threshold`, that domain
+scopes the recommendations and its matches are confidence-boosted.
+
+```sh
+cat weird_unlabeled.log | advsec --semantic
+```
+
+---
+
 ## CLI quick reference
 
 | Flag | What it does |
@@ -185,8 +251,9 @@ advsec plugin list         # see what's installed
 | `--json` | Machine-readable output |
 | `--no-color` | Plain output |
 | `-f, --input FILE` | Read from a file instead of stdin |
+| `--semantic`, `--embedding` | Opt in to the local AI classifier (see below) |
 
-Subcommands: `plugin list|install|update`, `update-cache`, `init zsh|bash|--install`.
+Subcommands: `plugin list|install|update`, `update-cache`, `init zsh|bash|--install`, `setup-semantic`.
 
 ---
 

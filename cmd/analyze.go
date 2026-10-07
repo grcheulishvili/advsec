@@ -108,6 +108,28 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	matcher := engine.NewMatcher(plugins)
 	matches := matcher.Evaluate(ctx)
 
+	// Optional hybrid semantic pass. Runs ONLY when forced via --semantic, or
+	// when enabled in config AND the deterministic engine was not confident.
+	// Any daemon failure degrades silently back to the deterministic matches.
+	if activeCtx == "" {
+		topConf := 0
+		for _, m := range matches {
+			if m.Confidence > topConf {
+				topConf = m.Confidence
+			}
+		}
+		if cfg, _ := engine.LoadSemanticConfig(); engine.ShouldRunSemantic(cfg, flagSemantic, topConf) {
+			if res, ok := engine.SemanticSuggest(cfg, ctx.Raw, os.Stderr); ok && plugin.IsKnownDomain(res.Domain) {
+				scoped := plugin.FilterByContext(load.Plugins, res.Domain)
+				sm := engine.NewMatcher(scoped).Evaluate(ctx)
+				engine.BoostConfidence(sm, 1)
+				matches = sm
+				activeCtx = res.Domain
+				fmt.Fprintf(os.Stderr, "advsec: semantic match -> domain %q (cosine %.2f)\n", res.Domain, res.Similarity)
+			}
+		}
+	}
+
 	// Confidence gate (suppresses weak, incidental matches).
 	minConf := flagMinConf
 	if flagAll {

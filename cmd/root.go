@@ -12,7 +12,7 @@ import (
 
 // Build metadata, overridable at link time via -ldflags.
 var (
-	Version = "1.2.1"
+	Version = "1.3.0"
 	Commit  = "dev"
 	Date    = "unknown"
 )
@@ -31,6 +31,7 @@ var (
 	flagNoClassify bool
 	flagFormat     string
 	flagFlat       bool
+	flagSemantic   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -88,6 +89,7 @@ func init() {
 	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newUpdateCacheCmd())
 	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newSetupSemanticCmd())
 }
 
 // addAnalyzeFlags registers the analysis flags on a flag set so both the root
@@ -105,4 +107,6 @@ func addAnalyzeFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&flagNoClassify, "no-classify", false, "disable magic-byte format gating (evaluate all domains)")
 	fs.StringVar(&flagFormat, "format", "", "force the input format (e.g. email/mime, binary/elf) instead of auto-detecting")
 	fs.BoolVar(&flagFlat, "flat", false, "render a flat per-plugin list instead of phase-grouped action chains")
+	fs.BoolVar(&flagSemantic, "semantic", false, "enable optional local embedding-based semantic classification (requires 'advsec setup-semantic')")
+	fs.BoolVar(&flagSemantic, "embedding", false, "alias for --semantic")
 }
